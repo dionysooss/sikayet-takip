@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}İstatistikler - Şikayet Takip{% endblock %}
+
+{% block content %}
+<h4 class="mb-4"><i class="bi bi-bar-chart"></i> İstatistikler</h4>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<div class="row g-4">
+    <!-- Durum Dağılımı -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-pie-chart"></i> Durum Dağılımı</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="chartDurum"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Platform Dağılımı -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-laptop"></i> Platform Dağılımı</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="chartPlatform"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Şikayet Türü Dağılımı -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-tags"></i> Şikayet Türü Dağılımı</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="chartTur"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Aylık Trend -->
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-header bg-white">
+                <h6 class="mb-0"><i class="bi bi-graph-up"></i> Aylık Trend</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="chartTrend"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Ortak Renk Paleti
+    const colors = [
+        '#4e73df', '#1cc88a', '#36b9cc', '#f6c23e', '#e74a3b', 
+        '#858796', '#5a5c69', '#f8f9fc', '#2e59d9', '#17a673'
+    ];
+
+    // 1. Durum Dağılımı (Doughnut)
+    const ctxDurum = document.getElementById('chartDurum').getContext('2d');
+    new Chart(ctxDurum, {
+        type: 'doughnut',
+        data: {
+            labels: [{% for durum, sayi in durum_dagilimi.items() %}"{{ durum }}",{% endfor %}],
+            datasets: [{
+                data: [{% for durum, sayi in durum_dagilimi.items() %}{{ sayi }},{% endfor %}],
+                backgroundColor: ['#4e73df', '#f6c23e', '#1cc88a', '#858796'], // Yeni, İşlemde, Çözüldü, Diğer
+                hoverOffset: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+
+    // 2. Platform Dağılımı (Bar)
+    const ctxPlatform = document.getElementById('chartPlatform').getContext('2d');
+    new Chart(ctxPlatform, {
+        type: 'bar',
+        data: {
+            labels: [{% for platform, sayi in platform_dagilimi %}"{{ platform }}",{% endfor %}],
+            datasets: [{
+                label: 'Şikayet Sayısı',
+                data: [{% for platform, sayi in platform_dagilimi %}{{ sayi }},{% endfor %}],
+                backgroundColor: '#36b9cc'
+            }]
+        },
+        options: {
+            scales: { y: { beginAtZero: true } },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // 3. Şikayet Türü Dağılımı (Horizontal Bar)
+    const ctxTur = document.getElementById('chartTur').getContext('2d');
+    new Chart(ctxTur, {
+        type: 'bar',
+        indexAxis: 'y',
+        data: {
+            labels: [{% for tur, sayi in tur_dagilimi %}"{{ tur }}",{% endfor %}],
+            datasets: [{
+                label: 'Şikayet Sayısı',
+                data: [{% for tur, sayi in tur_dagilimi %}{{ sayi }},{% endfor %}],
+                backgroundColor: '#e74a3b'
+            }]
+        },
+        options: {
+            scales: { x: { beginAtZero: true } },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // 4. Aylık Trend (Line)
+    // Verileri ters çevir (eskiden yeniye)
+    const trendLabels = [{% for ay, sayi in aylik_trend %}"{{ ay }}",{% endfor %}].reverse();
+    const trendData = [{% for ay, sayi in aylik_trend %}{{ sayi }},{% endfor %}].reverse();
+
+    const ctxTrend = document.getElementById('chartTrend').getContext('2d');
+    new Chart(ctxTrend, {
+        type: 'line',
+        data: {
+            labels: trendLabels,
+            datasets: [{
+                label: 'Aylık Şikayet',
+                data: trendData,
+                fill: true,
+                borderColor: '#4e73df',
+                backgroundColor: 'rgba(78, 115, 223, 0.1)',
+                tension: 0.3
+            }]
+        },
+        options: {
+            scales: { y: { beginAtZero: true } }
+        }
+    });
+</script>
+{% endblock %}
