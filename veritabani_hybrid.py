@@ -1,151 +1,32 @@
 import sqlite3
-import psycopg2
 import datetime
 import hashlib
 import os
-import socket
-
-def env_oku():
-    """
-    .env dosyasından veya ortam değişkenlerinden Supabase bilgilerini oku.
-    Güvenlik için şifreler kodda açık yazılmaz.
-    """
-    config = {
-        "host": os.environ.get("SUPABASE_HOST", ""),
-        "database": os.environ.get("SUPABASE_DATABASE", "postgres"),
-        "user": os.environ.get("SUPABASE_USER", "postgres"),
-        "password": os.environ.get("SUPABASE_PASSWORD", ""),
-        "port": os.environ.get("SUPABASE_PORT", "5432"),
-        "sslmode": "require"
-    }
-    
-    # .env dosyası varsa oku
-    env_yolu = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-    if os.path.exists(env_yolu):
-        try:
-            with open(env_yolu, "r", encoding="utf-8") as f:
-                for satir in f:
-                    satir = satir.strip()
-                    if satir and not satir.startswith("#") and "=" in satir:
-                        anahtar, deger = satir.split("=", 1)
-                        anahtar = anahtar.strip()
-                        deger = deger.strip()
-                        if anahtar == "SUPABASE_HOST":
-                            config["host"] = deger
-                        elif anahtar == "SUPABASE_DATABASE":
-                            config["database"] = deger
-                        elif anahtar == "SUPABASE_USER":
-                            config["user"] = deger
-                        elif anahtar == "SUPABASE_PASSWORD":
-                            config["password"] = deger
-                        elif anahtar == "SUPABASE_PORT":
-                            config["port"] = deger
-        except Exception as e:
-            print(f"⚠️ .env dosyası okunamadı: {e}")
-    
-    return config
-
-# Supabase bağlantı bilgileri (.env dosyasından veya ortam değişkenlerinden)
-SUPABASE_CONFIG = env_oku()
+import shutil
 
 class VeritabaniYonetici:
-    """Hibrit Veritabanı Yöneticisi - Offline/Online Senkronizasyon"""
+    """Yerel Veritabanı Yöneticisi (Çevrimdışı/Offline)"""
     
     def __init__(self, db_adi="sikayet_takip_local.db"):
         self.db_adi = db_adi
-        self.yerel_baglanti = None
-        self.yerel_imlec = None
-        self.bulut_baglanti = None
-        self.bulut_imlec = None
-        self.online_mod = False
-        self.bekleyen_islem_sayisi = 0
-        self.son_senkronizasyon = None  # Son senkronizasyon zamanı
+        self.baglanti = None
+        self.imlec = None
+        self.baglanti_kur()
         
-        # Yerel veritabanını her zaman aç
-        self._yerel_baglanti_kur()
-        
-        # Bulut bağlantısını arka planda dene (uygulamayı yavaşlatmasın)
-        import threading
-        threading.Thread(target=self._arka_plan_baglanti, daemon=True).start()
-    
-    def _arka_plan_baglanti(self):
-        """Bulut bağlantısını arka planda dene"""
-        self._bulut_baglanti_dene()
-        if self.online_mod:
-            self._senkronize_et()
-    
-    @property
-    def imlec(self):
-        """Geriye uyumluluk için yerel_imlec'e alias"""
-        return self.yerel_imlec
-
-    def _internet_var_mi(self):
-        """İnternet bağlantısını kontrol et"""
-        try:
-            socket.create_connection(("8.8.8.8", 53), timeout=1)
-            return True
-        except OSError:
-            return False
-
-    def _yerel_baglanti_kur(self):
+    def baglanti_kur(self):
         """Yerel SQLite veritabanına bağlan"""
         try:
-            self.yerel_baglanti = sqlite3.connect(self.db_adi, check_same_thread=False)
-            self.yerel_imlec = self.yerel_baglanti.cursor()
-            self._yerel_tablolari_olustur()
+            self.baglanti = sqlite3.connect(self.db_adi, check_same_thread=False)
+            self.imlec = self.baglanti.cursor()
+            self._tablolari_olustur()
             print("📁 Yerel veritabanı hazır")
         except Exception as e:
             print(f"❌ Yerel veritabanı hatası: {e}")
 
-    def _bulut_baglanti_dene(self):
-        """Supabase bağlantısını dene"""
-        if not self._internet_var_mi():
-            print("📴 İnternet bağlantısı yok - Çevrimdışı mod")
-            self.online_mod = False
-            return False
-        
-        try:
-            self.bulut_baglanti = psycopg2.connect(
-                host=SUPABASE_CONFIG["host"],
-                database=SUPABASE_CONFIG["database"],
-                user=SUPABASE_CONFIG["user"],
-                password=SUPABASE_CONFIG["password"],
-                port=SUPABASE_CONFIG["port"],
-                sslmode=SUPABASE_CONFIG["sslmode"],
-                connect_timeout=3
-            )
-            self.bulut_baglanti.autocommit = False
-            self.bulut_imlec = self.bulut_baglanti.cursor()
-            self._bulut_tablolari_olustur()
-            self.online_mod = True
-            print("☁️ Supabase bağlantısı başarılı - Çevrimiçi mod")
-            return True
-        except Exception as e:
-            print(f"📴 Supabase bağlantısı başarısız - Çevrimdışı mod: {e}")
-            self.online_mod = False
-            return False
-
-    def _bulut_baglanti_kontrol(self):
-        """Bulut bağlantısını kontrol et, gerekirse yeniden bağlan"""
-        if not self.online_mod:
-            return False
-        try:
-            # Bağlantıyı test et
-            self.bulut_imlec.execute("SELECT 1")
-            return True
-        except:
-            # Bağlantı kopmuş, yeniden bağlan
-            try:
-                self._bulut_baglanti_dene()
-                return self.online_mod
-            except:
-                self.online_mod = False
-                return False
-
-    def _yerel_tablolari_olustur(self):
+    def _tablolari_olustur(self):
         """Yerel SQLite tablolarını oluştur"""
-        # Ana tablolar
-        self.yerel_imlec.execute("""
+        # Şikayetler
+        self.imlec.execute("""
             CREATE TABLE IF NOT EXISTS sikayetler (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sikayet_no TEXT,
@@ -164,15 +45,14 @@ class VeritabaniYonetici:
                 sikayet_turu TEXT,
                 lokasyon TEXT,
                 oncelik TEXT,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER,
                 satin_alinan_yer TEXT,
                 basvurulan_yer TEXT,
                 bilet_ucreti TEXT
             )
         """)
         
-        self.yerel_imlec.execute("""
+        # Kullanıcılar
+        self.imlec.execute("""
             CREATE TABLE IF NOT EXISTS kullanicilar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 kullanici_adi TEXT UNIQUE NOT NULL,
@@ -182,13 +62,12 @@ class VeritabaniYonetici:
                 rol TEXT DEFAULT 'kullanici',
                 aktif INTEGER DEFAULT 1,
                 olusturma_tarihi TEXT,
-                son_giris TEXT,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER
+                son_giris TEXT
             )
         """)
         
-        self.yerel_imlec.execute("""
+        # İşlem Geçmişi
+        self.imlec.execute("""
             CREATE TABLE IF NOT EXISTS islem_gecmisi (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tarih TEXT NOT NULL,
@@ -199,994 +78,394 @@ class VeritabaniYonetici:
                 ilgili_kayit_id INTEGER,
                 ilgili_kayit_no TEXT,
                 eski_deger TEXT,
-                yeni_deger TEXT,
-                senkronize INTEGER DEFAULT 0
+                yeni_deger TEXT
             )
         """)
         
-        self.yerel_imlec.execute("""
+        # Şikayet İşlemleri (Detaylı loglar)
+        self.imlec.execute("""
             CREATE TABLE IF NOT EXISTS sikayet_islemleri (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sikayet_id INTEGER NOT NULL,
-                tarih TEXT NOT NULL,
-                kullanici_id INTEGER,
-                kullanici_adi TEXT,
-                islem_turu TEXT NOT NULL,
-                aciklama TEXT,
-                eski_durum TEXT,
-                yeni_durum TEXT,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                sikayet_id INTEGER, 
+                tarih TEXT, 
+                kullanici_id INTEGER, 
+                kullanici_adi TEXT, 
+                islem_turu TEXT, 
+                aciklama TEXT, 
+                eski_durum TEXT, 
+                yeni_durum TEXT
             )
         """)
         
-        # Bekleyen işlemler tablosu (senkronizasyon için)
-        self.yerel_imlec.execute("""
-            CREATE TABLE IF NOT EXISTS bekleyen_islemler (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tablo TEXT NOT NULL,
-                islem_turu TEXT NOT NULL,
-                veri TEXT NOT NULL,
-                olusturma_tarihi TEXT NOT NULL
-            )
-        """)
-        
-        # Şikayet notları tablosu
-        self.yerel_imlec.execute("""
-            CREATE TABLE IF NOT EXISTS sikayet_notlari (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sikayet_id INTEGER NOT NULL,
-                kullanici_id INTEGER,
-                kullanici_adi TEXT,
-                not_metni TEXT NOT NULL,
-                olusturma_tarihi TEXT NOT NULL,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER
-            )
-        """)
-        
-        # Şikayet dosyaları tablosu
-        self.yerel_imlec.execute("""
-            CREATE TABLE IF NOT EXISTS sikayet_dosyalari (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sikayet_id INTEGER NOT NULL,
-                dosya_adi TEXT NOT NULL,
-                dosya_yolu TEXT NOT NULL,
-                dosya_tipi TEXT,
-                dosya_boyutu INTEGER,
-                yukleyen_id INTEGER,
-                yukleyen_adi TEXT,
-                yukleme_tarihi TEXT NOT NULL,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER
-            )
-        """)
-        
-        # Şikayet etiketleri tablosu
-        self.yerel_imlec.execute("""
-            CREATE TABLE IF NOT EXISTS sikayet_etiketleri (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sikayet_id INTEGER NOT NULL,
-                etiket TEXT NOT NULL,
-                renk TEXT DEFAULT '#3498db',
-                ekleyen_id INTEGER,
-                ekleyen_adi TEXT,
-                ekleme_tarihi TEXT NOT NULL,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER
-            )
-        """)
-        
-        # Hatırlatıcılar tablosu
-        self.yerel_imlec.execute("""
+        # Hatırlatıcılar
+        self.imlec.execute("""
             CREATE TABLE IF NOT EXISTS hatirlaticilar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sikayet_id INTEGER NOT NULL,
-                kullanici_id INTEGER,
-                kullanici_adi TEXT,
-                hatirlatma_tarihi TEXT NOT NULL,
-                mesaj TEXT,
-                tamamlandi INTEGER DEFAULT 0,
-                olusturma_tarihi TEXT NOT NULL,
-                senkronize INTEGER DEFAULT 0,
-                bulut_id INTEGER
+                sikayet_id INTEGER,
+                not_metni TEXT,
+                hedef_tarih TEXT,
+                durum TEXT DEFAULT 'Aktif',
+                olusturan_id INTEGER,
+                olusturma_tarihi TEXT
             )
         """)
-        
-        # Sikayetler tablosuna satin_alinan_yer sütunu ekle (varsa atla)
-        try:
-            self.yerel_imlec.execute("ALTER TABLE sikayetler ADD COLUMN satin_alinan_yer TEXT")
-        except:
-            pass
-        
-        # Sikayetler tablosuna basvurulan_yer sütunu ekle (varsa atla)
-        try:
-            self.yerel_imlec.execute("ALTER TABLE sikayetler ADD COLUMN basvurulan_yer TEXT")
-        except:
-            pass
-        
-        # Sikayetler tablosuna bilet_ucreti sütunu ekle (varsa atla)
-        try:
-            self.yerel_imlec.execute("ALTER TABLE sikayetler ADD COLUMN bilet_ucreti TEXT")
-        except:
-            pass
-        
-        # Çöp kutusu tablosu
-        self.yerel_imlec.execute("""
-            CREATE TABLE IF NOT EXISTS cop_kutusu (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                sikayet_id INTEGER NOT NULL,
-                sikayet_no TEXT,
-                yolcu_adi TEXT,
-                seyahat_tarihi TEXT,
-                guzergah TEXT,
-                pnr TEXT,
-                iletisim TEXT,
-                platform TEXT,
-                sikayet_detay TEXT,
-                kayit_tarihi TEXT,
-                durum TEXT,
-                telefon TEXT,
-                eposta TEXT,
-                plaka TEXT,
-                sikayet_turu TEXT,
-                lokasyon TEXT,
-                oncelik TEXT,
-                silinme_tarihi TEXT,
-                silen_kullanici_id INTEGER,
-                silen_kullanici_adi TEXT
-            )
-        """)
-        
-        self.yerel_baglanti.commit()
-        
-        # Varsayılan admin kullanıcısı
-        self.yerel_imlec.execute("SELECT COUNT(*) FROM kullanicilar")
-        if self.yerel_imlec.fetchone()[0] == 0:
-            sifre_hash = hashlib.sha256("admin123".encode()).hexdigest()
-            tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.yerel_imlec.execute("""
-                INSERT INTO kullanicilar (kullanici_adi, sifre_hash, ad_soyad, email, rol, olusturma_tarihi, senkronize)
-                VALUES (?, ?, ?, ?, ?, ?, 1)
-            """, ("admin", sifre_hash, "Sistem Yöneticisi", "admin@sistem.com", "admin", tarih))
-            self.yerel_baglanti.commit()
 
-    def _bulut_tablolari_olustur(self):
-        """Supabase tablolarını oluştur"""
-        tablolar = [
-            """CREATE TABLE IF NOT EXISTS sikayetler (
-                id SERIAL PRIMARY KEY, sikayet_no TEXT, yolcu_adi TEXT, seyahat_tarihi TEXT,
-                guzergah TEXT, pnr TEXT, iletisim TEXT, platform TEXT, sikayet_detay TEXT,
-                kayit_tarihi TEXT, durum TEXT, telefon TEXT, eposta TEXT, plaka TEXT,
-                sikayet_turu TEXT, lokasyon TEXT, oncelik TEXT
-            )""",
-            """CREATE TABLE IF NOT EXISTS kullanicilar (
-                id SERIAL PRIMARY KEY, kullanici_adi TEXT UNIQUE NOT NULL, sifre_hash TEXT NOT NULL,
-                ad_soyad TEXT, email TEXT, rol TEXT DEFAULT 'kullanici', aktif INTEGER DEFAULT 1,
-                olusturma_tarihi TEXT, son_giris TEXT
-            )""",
-            """CREATE TABLE IF NOT EXISTS islem_gecmisi (
-                id SERIAL PRIMARY KEY, tarih TEXT NOT NULL, kullanici_id INTEGER, kullanici_adi TEXT,
-                islem_turu TEXT NOT NULL, islem_detay TEXT, ilgili_kayit_id INTEGER,
-                ilgili_kayit_no TEXT, eski_deger TEXT, yeni_deger TEXT
-            )""",
-            """CREATE TABLE IF NOT EXISTS sikayet_islemleri (
-                id SERIAL PRIMARY KEY, sikayet_id INTEGER NOT NULL, tarih TEXT NOT NULL,
-                kullanici_id INTEGER, kullanici_adi TEXT, islem_turu TEXT NOT NULL,
-                aciklama TEXT, eski_durum TEXT, yeni_durum TEXT
-            )"""
+        # Diğer Tablolar
+        self.imlec.execute("""CREATE TABLE IF NOT EXISTS sikayet_notlari (id INTEGER PRIMARY KEY, sikayet_id INTEGER, not_metni TEXT, olusturma_tarihi TEXT, kullanici_adi TEXT)""")
+        self.imlec.execute("""CREATE TABLE IF NOT EXISTS sikayet_dosyalari (id INTEGER PRIMARY KEY, sikayet_id INTEGER, dosya_adi TEXT, dosya_yolu TEXT)""")
+        
+        # Sütun güncellemeleri
+        cols = ["satin_alinan_yer", "basvurulan_yer", "bilet_ucreti", "tc_kimlik", "koltuk_no"]
+        for col in cols:
+            try: self.imlec.execute(f"ALTER TABLE sikayetler ADD COLUMN {col} TEXT")
+            except: pass
+        
+        # YENİ: AI ve SLA kolonları
+        ai_sla_cols = [
+            "ai_kategori",           # AI tarafından önerilen kategori
+            "ai_oncelik",            # AI tarafından önerilen öncelik
+            "ai_duygu",              # Duygu analizi sonucu
+            "ai_ozet",               # AI özeti
+            "ai_anahtar_kelimeler",  # Anahtar kelimeler (JSON)
+            "sla_hedef_tarih",       # SLA hedef tarihi
+            "whatsapp_bildirim"      # WhatsApp bildirimi gönderildi mi (0/1)
         ]
-        for tablo in tablolar:
-            self.bulut_imlec.execute(tablo)
-        self.bulut_baglanti.commit()
+        for col in ai_sla_cols:
+            try: self.imlec.execute(f"ALTER TABLE sikayetler ADD COLUMN {col} TEXT")
+            except: pass
 
-    def _senkronize_et(self):
-        """Bekleyen yerel verileri buluta senkronize et"""
-        if not self.online_mod:
+        # PERFORMANS: Index'ler ekle
+        try:
+            self.imlec.execute("CREATE INDEX IF NOT EXISTS idx_sikayet_no ON sikayetler(sikayet_no)")
+            self.imlec.execute("CREATE INDEX IF NOT EXISTS idx_durum ON sikayetler(durum)")
+            self.imlec.execute("CREATE INDEX IF NOT EXISTS idx_kayit_tarihi ON sikayetler(kayit_tarihi DESC)")
+            self.imlec.execute("CREATE INDEX IF NOT EXISTS idx_oncelik ON sikayetler(oncelik)")
+            self.imlec.execute("CREATE INDEX IF NOT EXISTS idx_yolcu_adi ON sikayetler(yolcu_adi)")
+            print("✅ Veritabanı index'leri oluşturuldu")
+        except Exception as e:
+            print(f"⚠️ Index oluşturma hatası (normal olabilir): {e}")
+        
+        self.baglanti.commit()
+        
+        # Admin Hesabı
+        self.imlec.execute("SELECT COUNT(*) FROM kullanicilar")
+        if self.imlec.fetchone()[0] == 0:
+            self.kullanici_ekle("admin", "admin123", "Yönetici", "admin@sistem.com", "admin")
+
+    # --- ŞİKAYET YÖNETİMİ ---
+    def sikayetleri_getir(self, limit=None, offset=0, filtre=None, siralama="kayit_tarihi DESC"):
+        """
+        Şikayetleri sayfalama ve filtre desteğiyle getir
+        
+        Args:
+            limit: Maksimum kayıt sayısı (None = tümü)
+            offset: Başlangıç pozisyonu (sayfalama için)
+            filtre: Dict - {'durum': 'Yeni', 'oncelik': 'Yüksek', 'arama': 'ahmet', 'tur': 'Personel Davranışı'}
+            siralama: Sıralama kriteri (örn: "kayit_tarihi DESC")
+        """
+        try:
+            query = """SELECT id, sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, 
+                       platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, 
+                       sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, 
+                       bilet_ucreti, tc_kimlik, koltuk_no 
+                       FROM sikayetler WHERE 1=1"""
+            params = []
+            
+            # Filtreler
+            if filtre:
+                if filtre.get('durum') and filtre['durum'] != 'Tümü':
+                    query += " AND durum = ?"
+                    params.append(filtre['durum'])
+                
+                if filtre.get('oncelik') and filtre['oncelik'] != 'Tümü':
+                    query += " AND oncelik = ?"
+                    params.append(filtre['oncelik'])
+                
+                if filtre.get('tur') and filtre['tur'] != 'Tümü':
+                    query += " AND sikayet_turu = ?"
+                    params.append(filtre['tur'])
+                
+                if filtre.get('arama'):
+                    arama = f"%{filtre['arama']}%"
+                    query += """ AND (yolcu_adi LIKE ? OR telefon LIKE ? OR pnr LIKE ? 
+                                OR guzergah LIKE ? OR sikayet_no LIKE ?)"""
+                    params.extend([arama, arama, arama, arama, arama])
+            
+            query += f" ORDER BY {siralama}"
+            
+            if limit:
+                query += " LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+            
+            self.imlec.execute(query, params)
+            return self.imlec.fetchall()
+        except Exception as e:
+            print(f"❌ Şikayet getirme hatası: {e}")
+            return []
+    
+    def sikayetleri_say(self, filtre=None):
+        """Toplam kayıt sayısını döndür (sayfalama için)"""
+        try:
+            query = "SELECT COUNT(*) FROM sikayetler WHERE 1=1"
+            params = []
+            
+            if filtre:
+                if filtre.get('durum') and filtre['durum'] != 'Tümü':
+                    query += " AND durum = ?"
+                    params.append(filtre['durum'])
+                
+                if filtre.get('oncelik') and filtre['oncelik'] != 'Tümü':
+                    query += " AND oncelik = ?"
+                    params.append(filtre['oncelik'])
+                
+                if filtre.get('tur') and filtre['tur'] != 'Tümü':
+                    query += " AND sikayet_turu = ?"
+                    params.append(filtre['tur'])
+                
+                if filtre.get('arama'):
+                    arama = f"%{filtre['arama']}%"
+                    query += """ AND (yolcu_adi LIKE ? OR telefon LIKE ? OR pnr LIKE ? 
+                                OR guzergah LIKE ? OR sikayet_no LIKE ?)"""
+                    params.extend([arama, arama, arama, arama, arama])
+            
+            self.imlec.execute(query, params)
+            return self.imlec.fetchone()[0]
+        except:
             return 0
-        
-        senkronize_edilen = 0
-        
+
+    def sikayet_ekle(self, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, telefon="", eposta="", plaka="", sikayet_turu="", lokasyon="", oncelik="", durum="Yeni", satin_alinan_yer="", basvurulan_yer="", bilet_ucreti="", tc_kimlik="", koltuk_no=""):
         try:
-            # Senkronize edilmemiş şikayetleri bul
-            self.yerel_imlec.execute("SELECT * FROM sikayetler WHERE senkronize = 0")
-            bekleyen_sikayetler = self.yerel_imlec.fetchall()
-            
-            for sikayet in bekleyen_sikayetler:
-                try:
-                    # Buluta ekle
-                    self.bulut_imlec.execute("""
-                        INSERT INTO sikayetler (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, 
-                        iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, 
-                        plaka, sikayet_turu, lokasyon, oncelik)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        RETURNING id
-                    """, sikayet[1:17])
-                    bulut_id = self.bulut_imlec.fetchone()[0]
-                    self.bulut_baglanti.commit()
-                    
-                    # Yerel kaydı güncelle
-                    self.yerel_imlec.execute("UPDATE sikayetler SET senkronize = 1, bulut_id = ? WHERE id = ?", (bulut_id, sikayet[0]))
-                    self.yerel_baglanti.commit()
-                    senkronize_edilen += 1
-                except Exception as e:
-                    print(f"Şikayet senkronizasyon hatası: {e}")
-                    self.bulut_baglanti.rollback()
-            
-            if senkronize_edilen > 0:
-                print(f"✅ {senkronize_edilen} kayıt senkronize edildi")
-            
-            # Buluttan yerel'e güncelle (diğer kullanıcıların eklediği veriler)
-            self._buluttan_cek()
-            
-        except Exception as e:
-            print(f"Senkronizasyon hatası: {e}")
-        
-        return senkronize_edilen
-
-    def _buluttan_cek(self):
-        """Buluttaki verileri yerele çek"""
-        if not self.online_mod:
-            return
-        
-        try:
-            # Buluttaki şikayetleri al
-            self.bulut_imlec.execute("SELECT * FROM sikayetler ORDER BY id")
-            bulut_sikayetler = self.bulut_imlec.fetchall()
-            
-            for sikayet in bulut_sikayetler:
-                bulut_id = sikayet[0]
-                # Yerel'de bu bulut_id var mı kontrol et
-                self.yerel_imlec.execute("SELECT id FROM sikayetler WHERE bulut_id = ?", (bulut_id,))
-                yerel = self.yerel_imlec.fetchone()
-                
-                if not yerel:
-                    # Yerel'de yok, ekle
-                    self.yerel_imlec.execute("""
-                        INSERT INTO sikayetler (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr,
-                        iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta,
-                        plaka, sikayet_turu, lokasyon, oncelik, senkronize, bulut_id)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                    """, sikayet[1:17] + (bulut_id,))
-            
-            self.yerel_baglanti.commit()
-            
-            # Kullanıcıları da senkronize et
-            self.bulut_imlec.execute("SELECT * FROM kullanicilar ORDER BY id")
-            bulut_kullanicilar = self.bulut_imlec.fetchall()
-            
-            for kullanici in bulut_kullanicilar:
-                bulut_id = kullanici[0]
-                self.yerel_imlec.execute("SELECT id FROM kullanicilar WHERE bulut_id = ?", (bulut_id,))
-                yerel = self.yerel_imlec.fetchone()
-                
-                if not yerel:
-                    # Kullanıcı adı çakışması kontrolü
-                    self.yerel_imlec.execute("SELECT id FROM kullanicilar WHERE kullanici_adi = ?", (kullanici[1],))
-                    if not self.yerel_imlec.fetchone():
-                        self.yerel_imlec.execute("""
-                            INSERT INTO kullanicilar (kullanici_adi, sifre_hash, ad_soyad, email, rol, aktif, olusturma_tarihi, son_giris, senkronize, bulut_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-                        """, kullanici[1:9] + (bulut_id,))
-            
-            self.yerel_baglanti.commit()
-            
-        except Exception as e:
-            print(f"Buluttan çekme hatası: {e}")
-
-    def baglanti_kur(self):
-        """Uyumluluk için"""
-        return True
-
-    def baglanti_durumu(self):
-        """Bağlantı durumunu döndür"""
-        return {
-            "online": self.online_mod,
-            "bekleyen": self._bekleyen_islem_sayisi()
-        }
-
-    def _bekleyen_islem_sayisi(self):
-        """Senkronize edilmemiş kayıt sayısı"""
-        self.yerel_imlec.execute("SELECT COUNT(*) FROM sikayetler WHERE senkronize = 0")
-        return self.yerel_imlec.fetchone()[0]
-
-    def yeniden_baglan(self):
-        """Bulut bağlantısını yeniden dene ve senkronize et"""
-        if self._bulut_baglanti_dene():
-            self._senkronize_et()
+            no = self.sikayet_no_olustur()
+            tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.imlec.execute("""INSERT INTO sikayetler (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti, tc_kimlik, koltuk_no) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", 
+                               (no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, tarih, durum, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti, tc_kimlik, koltuk_no))
+            self.baglanti.commit()
             return True
-        return False
+        except Exception as e:
+            print(f"HATA: sikayet_ekle sırasında hata oluştu: {e}")
+            raise e
 
-    # ==================== ŞİKAYET İŞLEMLERİ ====================
+    def sikayet_guncelle(self, id, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer="", basvurulan_yer="", bilet_ucreti="", tc_kimlik="", koltuk_no=""):
+        try:
+            self.imlec.execute("""UPDATE sikayetler SET yolcu_adi=?, seyahat_tarihi=?, guzergah=?, pnr=?, iletisim=?, platform=?, sikayet_detay=?, telefon=?, eposta=?, plaka=?, sikayet_turu=?, lokasyon=?, oncelik=?, satin_alinan_yer=?, basvurulan_yer=?, bilet_ucreti=?, tc_kimlik=?, koltuk_no=? WHERE id=?""", 
+                               (yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti, tc_kimlik, koltuk_no, id))
+            self.baglanti.commit()
+        except Exception as e:
+            print(f"HATA: sikayet_guncelle sırasında hata: {e}")
+            raise e
+
+    def durumu_guncelle(self, id, durum):
+        try:
+            self.imlec.execute("UPDATE sikayetler SET durum=? WHERE id=?", (durum, id))
+            self.baglanti.commit()
+        except Exception as e:
+            print(f"HATA: durumu_guncelle sırasında hata: {e}")
+
+    def sikayet_sil(self, id):
+        try:
+            self.imlec.execute("DELETE FROM sikayetler WHERE id=?", (id,))
+            self.baglanti.commit()
+        except Exception as e:
+            print(f"HATA: sikayet_sil sırasında hata: {e}")
+            raise e
 
     def sikayet_no_olustur(self):
         simdi = datetime.datetime.now()
-        yil = simdi.year
-        prefix = f"IPT/{yil}-"
-        
-        # Önce buluttan kontrol et (online ise)
-        son_no = 0
-        if self.online_mod:
-            try:
-                self.bulut_imlec.execute("SELECT sikayet_no FROM sikayetler WHERE sikayet_no LIKE %s ORDER BY id DESC LIMIT 1", (f"{prefix}%",))
-                son_kayit = self.bulut_imlec.fetchone()
-                if son_kayit:
-                    son_no = int(son_kayit[0].split('-')[1])
-            except:
-                pass
-        
-        # Yerel'den de kontrol et
-        self.yerel_imlec.execute("SELECT sikayet_no FROM sikayetler WHERE sikayet_no LIKE ? ORDER BY id DESC LIMIT 1", (f"{prefix}%",))
-        yerel_kayit = self.yerel_imlec.fetchone()
-        if yerel_kayit:
-            yerel_no = int(yerel_kayit[0].split('-')[1])
-            son_no = max(son_no, yerel_no)
-        
-        return f"{prefix}{son_no + 1:05d}"
-
-    def sikayet_ekle(self, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, telefon="", eposta="", plaka="", sikayet_turu="", lokasyon="", oncelik="", durum="Yeni", satin_alinan_yer="", basvurulan_yer="", bilet_ucreti=""):
-        kayit_tarihi = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        sikayet_no = self.sikayet_no_olustur()
-        
-        # Önce yerel'e kaydet
-        self.yerel_imlec.execute("""
-            INSERT INTO sikayetler (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, 
-            platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, sikayet_turu, 
-            lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti, senkronize, bulut_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, 
-              sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, sikayet_turu, 
-              lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti, 0, None))
-        yerel_id = self.yerel_imlec.lastrowid
-        self.yerel_baglanti.commit()
-        
-        # Online ise buluta da kaydet
-        if self.online_mod:
-            try:
-                self.bulut_imlec.execute("""
-                    INSERT INTO sikayetler (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, 
-                    iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, 
-                    plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """, (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, 
-                      sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, sikayet_turu, 
-                      lokasyon, oncelik, satin_alinan_yer, basvurulan_yer))
-                bulut_id = self.bulut_imlec.fetchone()[0]
-                self.bulut_baglanti.commit()
-                
-                # Yerel kaydı güncelle
-                self.yerel_imlec.execute("UPDATE sikayetler SET senkronize = 1, bulut_id = ? WHERE id = ?", (bulut_id, yerel_id))
-                self.yerel_baglanti.commit()
-            except Exception as e:
-                print(f"Bulut kayıt hatası (yerel'de kaydedildi): {e}")
-                self.bulut_baglanti.rollback()
-
-    def sikayetleri_getir(self):
-        # Senkronizasyon sadece 5 dakikada bir yapılsın (performans için)
-        import datetime
-        simdi = datetime.datetime.now()
-        if self.online_mod and self.son_senkronizasyon:
-            fark = (simdi - self.son_senkronizasyon).total_seconds()
-            if fark > 300:  # 5 dakikadan fazla olduysa senkronize et
-                self._buluttan_cek()
-                self.son_senkronizasyon = simdi
-        elif self.online_mod and not self.son_senkronizasyon:
-            self._buluttan_cek()
-            self.son_senkronizasyon = simdi
-        
-        self.yerel_imlec.execute("SELECT id, sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti FROM sikayetler ORDER BY kayit_tarihi DESC")
-        return self.yerel_imlec.fetchall()
-
-    def sikayet_sil(self, id):
-        # Bulut ID'yi al
-        self.yerel_imlec.execute("SELECT bulut_id FROM sikayetler WHERE id = ?", (id,))
-        result = self.yerel_imlec.fetchone()
-        bulut_id = result[0] if result else None
-        
-        # Yerel'den sil
-        self.yerel_imlec.execute("DELETE FROM sikayet_islemleri WHERE sikayet_id = ?", (id,))
-        self.yerel_imlec.execute("DELETE FROM sikayetler WHERE id = ?", (id,))
-        self.yerel_baglanti.commit()
-        
-        # Buluttan da sil
-        if self._bulut_baglanti_kontrol() and bulut_id:
-            try:
-                self.bulut_imlec.execute("DELETE FROM sikayet_islemleri WHERE sikayet_id = %s", (bulut_id,))
-                self.bulut_imlec.execute("DELETE FROM sikayetler WHERE id = %s", (bulut_id,))
-                self.bulut_baglanti.commit()
-            except Exception as e:
-                print(f"Bulut silme hatası: {e}")
-                try:
-                    self.bulut_baglanti.rollback()
-                except:
-                    pass
-
-    def durumu_guncelle(self, id, yeni_durum):
-        self.yerel_imlec.execute("SELECT bulut_id FROM sikayetler WHERE id = ?", (id,))
-        result = self.yerel_imlec.fetchone()
-        bulut_id = result[0] if result else None
-        
-        self.yerel_imlec.execute("UPDATE sikayetler SET durum = ? WHERE id = ?", (yeni_durum, id))
-        self.yerel_baglanti.commit()
-        
-        if self._bulut_baglanti_kontrol() and bulut_id:
-            try:
-                self.bulut_imlec.execute("UPDATE sikayetler SET durum = %s WHERE id = %s", (yeni_durum, bulut_id))
-                self.bulut_baglanti.commit()
-            except Exception as e:
-                print(f"Bulut güncelleme hatası: {e}")
-                try:
-                    self.bulut_baglanti.rollback()
-                except:
-                    pass
-
-    def sikayet_guncelle(self, id, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer="", basvurulan_yer="", bilet_ucreti=""):
-        self.yerel_imlec.execute("SELECT bulut_id FROM sikayetler WHERE id = ?", (id,))
-        result = self.yerel_imlec.fetchone()
-        bulut_id = result[0] if result else None
-        
-        self.yerel_imlec.execute("""
-            UPDATE sikayetler SET yolcu_adi = ?, seyahat_tarihi = ?, guzergah = ?, pnr = ?, 
-            iletisim = ?, platform = ?, sikayet_detay = ?, telefon = ?, eposta = ?, plaka = ?, 
-            sikayet_turu = ?, lokasyon = ?, oncelik = ?, satin_alinan_yer = ?, basvurulan_yer = ?, bilet_ucreti = ? WHERE id = ?
-        """, (yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, 
-              telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bilet_ucreti, id))
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod and bulut_id:
-            try:
-                self.bulut_imlec.execute("""
-                    UPDATE sikayetler SET yolcu_adi = %s, seyahat_tarihi = %s, guzergah = %s, 
-                    pnr = %s, iletisim = %s, platform = %s, sikayet_detay = %s, telefon = %s, 
-                    eposta = %s, plaka = %s, sikayet_turu = %s, lokasyon = %s, oncelik = %s, 
-                    satin_alinan_yer = %s, basvurulan_yer = %s WHERE id = %s
-                """, (yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, 
-                      telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, basvurulan_yer, bulut_id))
-                self.bulut_baglanti.commit()
-            except Exception as e:
-                print(f"Bulut güncelleme hatası: {e}")
-                self.bulut_baglanti.rollback()
-
-    # ==================== KULLANICI YÖNETİMİ ====================
-
-    def sifre_hashle(self, sifre):
-        return hashlib.sha256(sifre.encode()).hexdigest()
-
-    def kullanici_ekle(self, kullanici_adi, sifre, ad_soyad="", email="", rol="kullanici"):
+        prefix = f"IPT/{simdi.year}-"
+        self.imlec.execute("SELECT sikayet_no FROM sikayetler WHERE sikayet_no LIKE ? ORDER BY id DESC LIMIT 1", (f"{prefix}%",))
+        res = self.imlec.fetchone()
+        num = int(res[0].split('-')[1]) if res else 0
+        return f"{prefix}{num+1:05d}"
+    
+    def istatistikleri_getir(self):
+        stats = {}
         try:
-            sifre_hash = self.sifre_hashle(sifre)
-            olusturma_tarihi = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            self.yerel_imlec.execute("""
-                INSERT INTO kullanicilar (kullanici_adi, sifre_hash, ad_soyad, email, rol, olusturma_tarihi, senkronize, bulut_id)
-                VALUES (?, ?, ?, ?, ?, ?, 0, NULL)
-            """, (kullanici_adi, sifre_hash, ad_soyad, email, rol, olusturma_tarihi))
-            yerel_id = self.yerel_imlec.lastrowid
-            self.yerel_baglanti.commit()
-            
-            if self.online_mod:
-                try:
-                    self.bulut_imlec.execute("""
-                        INSERT INTO kullanicilar (kullanici_adi, sifre_hash, ad_soyad, email, rol, olusturma_tarihi)
-                        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
-                    """, (kullanici_adi, sifre_hash, ad_soyad, email, rol, olusturma_tarihi))
-                    bulut_id = self.bulut_imlec.fetchone()[0]
-                    self.bulut_baglanti.commit()
-                    
-                    self.yerel_imlec.execute("UPDATE kullanicilar SET senkronize = 1, bulut_id = ? WHERE id = ?", (bulut_id, yerel_id))
-                    self.yerel_baglanti.commit()
-                except Exception as e:
-                    print(f"Bulut kullanıcı ekleme hatası: {e}")
-                    self.bulut_baglanti.rollback()
-            
-            return True
-        except sqlite3.IntegrityError:
-            return False
+            self.imlec.execute("SELECT COUNT(*) FROM sikayetler")
+            stats['toplam'] = self.imlec.fetchone()[0]
+            self.imlec.execute("SELECT durum, COUNT(*) FROM sikayetler GROUP BY durum")
+            for r in self.imlec.fetchall(): stats[r[0]] = r[1]
+        except: pass
+        return stats
 
-    def giris_yap(self, kullanici_adi, sifre):
-        sifre_hash = self.sifre_hashle(sifre)
-        
-        # Önce yerel'den kontrol et
-        self.yerel_imlec.execute("""
-            SELECT id, kullanici_adi, ad_soyad, email, rol, aktif 
-            FROM kullanicilar WHERE kullanici_adi = ? AND sifre_hash = ?
-        """, (kullanici_adi, sifre_hash))
-        
-        kullanici = self.yerel_imlec.fetchone()
-        
-        if kullanici and kullanici[5] == 1:
-            son_giris = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.yerel_imlec.execute("UPDATE kullanicilar SET son_giris = ? WHERE id = ?", (son_giris, kullanici[0]))
-            self.yerel_baglanti.commit()
-            
-            return {
-                "id": kullanici[0],
-                "kullanici_adi": kullanici[1],
-                "ad_soyad": kullanici[2],
-                "email": kullanici[3],
-                "rol": kullanici[4]
-            }
+    # --- KULLANICI İŞLEMLERİ ---
+    def sifre_hashle(self, s): return hashlib.sha256(s.encode()).hexdigest()
+
+    def giris_yap(self, kadi, sifre):
+        h = self.sifre_hashle(sifre)
+        self.imlec.execute("SELECT id, kullanici_adi, ad_soyad, email, rol, aktif FROM kullanicilar WHERE kullanici_adi=? AND sifre_hash=?", (kadi, h))
+        u = self.imlec.fetchone()
+        if u and u[5] == 1:
+            self.imlec.execute("UPDATE kullanicilar SET son_giris=? WHERE id=?", (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), u[0]))
+            self.baglanti.commit()
+            return {"id":u[0], "kullanici_adi":u[1], "ad_soyad":u[2], "email":u[3], "rol":u[4]}
         return None
 
+    def kullanici_ekle(self, ka, sifre, ad="", em="", rol="kullanici"):
+        try:
+            self.imlec.execute("INSERT INTO kullanicilar (kullanici_adi, sifre_hash, ad_soyad, email, rol, olusturma_tarihi) VALUES (?,?,?,?,?,?)", 
+                               (ka, self.sifre_hashle(sifre), ad, em, rol, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            self.baglanti.commit()
+            return True
+        except: return False
+
     def kullanicilari_getir(self):
-        self.yerel_imlec.execute("""
-            SELECT id, kullanici_adi, ad_soyad, email, rol, aktif, olusturma_tarihi, son_giris 
-            FROM kullanicilar ORDER BY id
-        """)
-        return self.yerel_imlec.fetchall()
-
-    def kullanici_sil(self, kullanici_id):
-        self.yerel_imlec.execute("SELECT kullanici_adi, bulut_id FROM kullanicilar WHERE id = ?", (kullanici_id,))
-        result = self.yerel_imlec.fetchone()
-        if result and result[0] == "admin":
-            return False
+        self.imlec.execute("SELECT id, kullanici_adi, ad_soyad, email, rol, aktif, olusturma_tarihi, son_giris FROM kullanicilar")
+        return self.imlec.fetchall()
         
-        bulut_id = result[1] if result else None
-        
-        self.yerel_imlec.execute("DELETE FROM kullanicilar WHERE id = ?", (kullanici_id,))
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod and bulut_id:
-            try:
-                self.bulut_imlec.execute("DELETE FROM kullanicilar WHERE id = %s", (bulut_id,))
-                self.bulut_baglanti.commit()
-            except:
-                self.bulut_baglanti.rollback()
-        
+    def kullanici_sil(self, uid):
+        self.imlec.execute("DELETE FROM kullanicilar WHERE id=?", (uid,))
+        self.baglanti.commit()
         return True
+        
+    def kullanici_guncelle(self, uid, ad, mail, rol, aktif):
+        self.imlec.execute("UPDATE kullanicilar SET ad_soyad=?, email=?, rol=?, aktif=? WHERE id=?", (ad, mail, rol, aktif, uid))
+        self.baglanti.commit()
+        
+    def sifre_degistir(self, uid, yeni):
+        self.imlec.execute("UPDATE kullanicilar SET sifre_hash=? WHERE id=?", (self.sifre_hashle(yeni), uid))
+        self.baglanti.commit()
 
-    def kullanici_guncelle(self, kullanici_id, ad_soyad, email, rol, aktif):
-        self.yerel_imlec.execute("SELECT bulut_id FROM kullanicilar WHERE id = ?", (kullanici_id,))
-        result = self.yerel_imlec.fetchone()
-        bulut_id = result[0] if result else None
-        
-        self.yerel_imlec.execute("""
-            UPDATE kullanicilar SET ad_soyad = ?, email = ?, rol = ?, aktif = ? WHERE id = ?
-        """, (ad_soyad, email, rol, aktif, kullanici_id))
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod and bulut_id:
-            try:
-                self.bulut_imlec.execute("""
-                    UPDATE kullanicilar SET ad_soyad = %s, email = %s, rol = %s, aktif = %s WHERE id = %s
-                """, (ad_soyad, email, rol, aktif, bulut_id))
-                self.bulut_baglanti.commit()
-            except:
-                self.bulut_baglanti.rollback()
-
-    def sifre_degistir(self, kullanici_id, yeni_sifre):
-        sifre_hash = self.sifre_hashle(yeni_sifre)
-        
-        self.yerel_imlec.execute("SELECT bulut_id FROM kullanicilar WHERE id = ?", (kullanici_id,))
-        result = self.yerel_imlec.fetchone()
-        bulut_id = result[0] if result else None
-        
-        self.yerel_imlec.execute("UPDATE kullanicilar SET sifre_hash = ? WHERE id = ?", (sifre_hash, kullanici_id))
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod and bulut_id:
-            try:
-                self.bulut_imlec.execute("UPDATE kullanicilar SET sifre_hash = %s WHERE id = %s", (sifre_hash, bulut_id))
-                self.bulut_baglanti.commit()
-            except:
-                self.bulut_baglanti.rollback()
-
-    # ==================== İŞLEM GEÇMİŞİ ====================
-
+    # --- MAIN.PY UYUMLULUĞU ---
+    
     def islem_kaydet(self, kullanici_id, kullanici_adi, islem_turu, islem_detay, ilgili_kayit_id=None, ilgili_kayit_no=None, eski_deger=None, yeni_deger=None):
+        """İşlem geçmişine kayıt at"""
+        self.imlec.execute("INSERT INTO islem_gecmisi (tarih, kullanici_id, kullanici_adi, islem_turu, islem_detay, ilgili_kayit_id, ilgili_kayit_no, eski_deger, yeni_deger) VALUES (?,?,?,?,?,?,?,?,?)",
+                           (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), kullanici_id, kullanici_adi, islem_turu, islem_detay, ilgili_kayit_id, ilgili_kayit_no, eski_deger, yeni_deger))
+        self.baglanti.commit()
+        
+    def sikayet_islemi_ekle(self, sikayet_id, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum=None, yeni_durum=None):
+        """Şikayet özelinde işlem kaydı"""
         tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        self.yerel_imlec.execute("""
-            INSERT INTO islem_gecmisi (tarih, kullanici_id, kullanici_adi, islem_turu, islem_detay, 
-            ilgili_kayit_id, ilgili_kayit_no, eski_deger, yeni_deger, senkronize)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (tarih, kullanici_id, kullanici_adi, islem_turu, islem_detay, ilgili_kayit_id, ilgili_kayit_no, eski_deger, yeni_deger, 0))
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod:
-            try:
-                self.bulut_imlec.execute("""
-                    INSERT INTO islem_gecmisi (tarih, kullanici_id, kullanici_adi, islem_turu, islem_detay, 
-                    ilgili_kayit_id, ilgili_kayit_no, eski_deger, yeni_deger)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """, (tarih, kullanici_id, kullanici_adi, islem_turu, islem_detay, ilgili_kayit_id, ilgili_kayit_no, eski_deger, yeni_deger))
-                self.bulut_baglanti.commit()
-            except:
-                self.bulut_baglanti.rollback()
-
-    def islem_gecmisini_getir(self, limit=100):
-        self.yerel_imlec.execute("""
-            SELECT id, tarih, kullanici_adi, islem_turu, islem_detay, ilgili_kayit_no, eski_deger, yeni_deger
-            FROM islem_gecmisi ORDER BY id DESC LIMIT ?
-        """, (limit,))
-        return self.yerel_imlec.fetchall()
-
-    def islem_gecmisini_temizle(self, gun_sayisi=30):
-        tarih_sinir = (datetime.datetime.now() - datetime.timedelta(days=gun_sayisi)).strftime("%Y-%m-%d %H:%M:%S")
-        self.yerel_imlec.execute("DELETE FROM islem_gecmisi WHERE tarih < ?", (tarih_sinir,))
-        self.yerel_baglanti.commit()
-
-    # ==================== ŞİKAYET İŞLEMLERİ ====================
-
-    def sikayet_islemi_ekle(self, sikayet_id, kullanici_id, kullanici_adi, islem_turu, aciklama=None, eski_durum=None, yeni_durum=None):
-        tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        self.yerel_imlec.execute("""
-            INSERT INTO sikayet_islemleri (sikayet_id, tarih, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum, senkronize, bulut_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
-        """, (sikayet_id, tarih, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum))
-        yerel_id = self.yerel_imlec.lastrowid
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod:
-            # Bulut sikayet_id'yi bul
-            self.yerel_imlec.execute("SELECT bulut_id FROM sikayetler WHERE id = ?", (sikayet_id,))
-            result = self.yerel_imlec.fetchone()
-            bulut_sikayet_id = result[0] if result else None
-            
-            if bulut_sikayet_id:
-                try:
-                    self.bulut_imlec.execute("""
-                        INSERT INTO sikayet_islemleri (sikayet_id, tarih, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
-                    """, (bulut_sikayet_id, tarih, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum))
-                    bulut_id = self.bulut_imlec.fetchone()[0]
-                    self.bulut_baglanti.commit()
-                    
-                    self.yerel_imlec.execute("UPDATE sikayet_islemleri SET senkronize = 1, bulut_id = ? WHERE id = ?", (bulut_id, yerel_id))
-                    self.yerel_baglanti.commit()
-                except:
-                    self.bulut_baglanti.rollback()
-        
-        return yerel_id
+        self.imlec.execute("INSERT INTO sikayet_islemleri (sikayet_id, tarih, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum) VALUES (?,?,?,?,?,?,?,?)",
+                           (sikayet_id, tarih, kullanici_id, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum))
+        self.baglanti.commit()
 
     def sikayet_islemlerini_getir(self, sikayet_id):
-        self.yerel_imlec.execute("""
-            SELECT id, tarih, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum
-            FROM sikayet_islemleri WHERE sikayet_id = ? ORDER BY id DESC
-        """, (sikayet_id,))
-        return self.yerel_imlec.fetchall()
+        self.imlec.execute("SELECT * FROM sikayet_islemleri WHERE sikayet_id=? ORDER BY tarih DESC", (sikayet_id,))
+        return self.imlec.fetchall()
 
     def sikayet_islemini_sil(self, islem_id):
-        self.yerel_imlec.execute("SELECT bulut_id FROM sikayet_islemleri WHERE id = ?", (islem_id,))
-        result = self.yerel_imlec.fetchone()
-        bulut_id = result[0] if result else None
-        
-        self.yerel_imlec.execute("DELETE FROM sikayet_islemleri WHERE id = ?", (islem_id,))
-        self.yerel_baglanti.commit()
-        
-        if self.online_mod and bulut_id:
-            try:
-                self.bulut_imlec.execute("DELETE FROM sikayet_islemleri WHERE id = %s", (bulut_id,))
-                self.bulut_baglanti.commit()
-            except:
-                self.bulut_baglanti.rollback()
+        self.imlec.execute("DELETE FROM sikayet_islemleri WHERE id=?", (islem_id,))
+        self.baglanti.commit()
 
-    # ==================== ŞİKAYET NOTLARI ====================
-
-    def not_ekle(self, sikayet_id, kullanici_id, kullanici_adi, not_metni):
-        tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.yerel_imlec.execute("""
-            INSERT INTO sikayet_notlari (sikayet_id, kullanici_id, kullanici_adi, not_metni, olusturma_tarihi, senkronize)
-            VALUES (?, ?, ?, ?, ?, 0)
-        """, (sikayet_id, kullanici_id, kullanici_adi, not_metni, tarih))
-        self.yerel_baglanti.commit()
-        return self.yerel_imlec.lastrowid
 
     def notlari_getir(self, sikayet_id):
-        self.yerel_imlec.execute("""
-            SELECT id, kullanici_adi, not_metni, olusturma_tarihi
-            FROM sikayet_notlari WHERE sikayet_id = ? ORDER BY id DESC
-        """, (sikayet_id,))
-        return self.yerel_imlec.fetchall()
+        try:
+            # Sütun kontrolü (Eski veritabanları için)
+            try: self.imlec.execute("SELECT kullanici_adi FROM sikayet_notlari LIMIT 1")
+            except: 
+                try: self.imlec.execute("ALTER TABLE sikayet_notlari ADD COLUMN kullanici_adi TEXT")
+                except: pass
+            
+            self.imlec.execute("SELECT id, kullanici_adi, not_metni, olusturma_tarihi FROM sikayet_notlari WHERE sikayet_id=? ORDER BY olusturma_tarihi DESC", (sikayet_id,))
+            res = self.imlec.fetchall()
+            # Eğer tuple dönerse (id, user, text, date) formatında olmalı.
+            # Eğer kullanıcı adı None ise "Sistem" yap
+            sonuc = []
+            for r in res:
+                r_list = list(r)
+                if not r_list[1]: r_list[1] = "Sistem"
+                sonuc.append(tuple(r_list))
+            return sonuc
+        except Exception as e:
+            print(f"Not getirme hatası: {e}")
+            return []
+            
+    def not_ekle(self, sikayet_id, kullanici_adi, not_metni):
+        tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            self.imlec.execute("INSERT INTO sikayet_notlari (sikayet_id, kullanici_adi, not_metni, olusturma_tarihi) VALUES (?,?,?,?)",
+                            (sikayet_id, kullanici_adi, not_metni, tarih))
+            self.baglanti.commit()
+            return True
+        except: return False
 
     def not_sil(self, not_id):
-        self.yerel_imlec.execute("DELETE FROM sikayet_notlari WHERE id = ?", (not_id,))
-        self.yerel_baglanti.commit()
+        self.imlec.execute("DELETE FROM sikayet_notlari WHERE id=?", (not_id,))
+        self.baglanti.commit()
 
-    # ==================== ŞİKAYET DOSYALARI ====================
 
-    def dosya_ekle(self, sikayet_id, dosya_adi, dosya_yolu, dosya_tipi, dosya_boyutu, yukleyen_id, yukleyen_adi):
+    def baglanti_durumu(self):
+        """Offline mod olduğu için sabit"""
+        return {"online": True, "bekleyen": 0}
+
+    def yeniden_baglan(self):
+        return True
+
+    # --- HATIRLATICI İŞLEMLERİ ---
+    def hatirlatici_ekle(self, sikayet_id, not_metni, hedef_tarih, olusturan_id):
         tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.yerel_imlec.execute("""
-            INSERT INTO sikayet_dosyalari (sikayet_id, dosya_adi, dosya_yolu, dosya_tipi, dosya_boyutu, yukleyen_id, yukleyen_adi, yukleme_tarihi, senkronize)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-        """, (sikayet_id, dosya_adi, dosya_yolu, dosya_tipi, dosya_boyutu, yukleyen_id, yukleyen_adi, tarih))
-        self.yerel_baglanti.commit()
-        return self.yerel_imlec.lastrowid
+        self.imlec.execute("INSERT INTO hatirlaticilar (sikayet_id, not_metni, hedef_tarih, olusturan_id, olusturma_tarihi) VALUES (?,?,?,?,?)",
+                           (sikayet_id, not_metni, hedef_tarih, olusturan_id, tarih))
+        self.baglanti.commit()
+        return True
 
-    def dosyalari_getir(self, sikayet_id):
-        self.yerel_imlec.execute("""
-            SELECT id, dosya_adi, dosya_yolu, dosya_tipi, dosya_boyutu, yukleyen_adi, yukleme_tarihi
-            FROM sikayet_dosyalari WHERE sikayet_id = ? ORDER BY id DESC
-        """, (sikayet_id,))
-        return self.yerel_imlec.fetchall()
-
-    def dosya_sil(self, dosya_id):
-        # Önce dosya yolunu al
-        self.yerel_imlec.execute("SELECT dosya_yolu FROM sikayet_dosyalari WHERE id = ?", (dosya_id,))
-        result = self.yerel_imlec.fetchone()
-        if result and os.path.exists(result[0]):
-            try:
-                os.remove(result[0])
-            except:
-                pass
-        self.yerel_imlec.execute("DELETE FROM sikayet_dosyalari WHERE id = ?", (dosya_id,))
-        self.yerel_baglanti.commit()
-
-    # ==================== ŞİKAYET ETİKETLERİ ====================
-
-    def etiket_ekle(self, sikayet_id, etiket, renk, ekleyen_id, ekleyen_adi):
-        tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        # Aynı etiket varsa ekleme
-        self.yerel_imlec.execute("SELECT id FROM sikayet_etiketleri WHERE sikayet_id = ? AND etiket = ?", (sikayet_id, etiket))
-        if self.yerel_imlec.fetchone():
-            return None
-        self.yerel_imlec.execute("""
-            INSERT INTO sikayet_etiketleri (sikayet_id, etiket, renk, ekleyen_id, ekleyen_adi, ekleme_tarihi, senkronize)
-            VALUES (?, ?, ?, ?, ?, ?, 0)
-        """, (sikayet_id, etiket, renk, ekleyen_id, ekleyen_adi, tarih))
-        self.yerel_baglanti.commit()
-        return self.yerel_imlec.lastrowid
-
-    def etiketleri_getir(self, sikayet_id):
-        self.yerel_imlec.execute("""
-            SELECT id, etiket, renk, ekleyen_adi, ekleme_tarihi
-            FROM sikayet_etiketleri WHERE sikayet_id = ? ORDER BY id
-        """, (sikayet_id,))
-        return self.yerel_imlec.fetchall()
-
-    def etiket_sil(self, etiket_id):
-        self.yerel_imlec.execute("DELETE FROM sikayet_etiketleri WHERE id = ?", (etiket_id,))
-        self.yerel_baglanti.commit()
-
-    def tum_etiketleri_getir(self):
-        """Sistemdeki tüm benzersiz etiketleri getir"""
-        self.yerel_imlec.execute("SELECT DISTINCT etiket, renk FROM sikayet_etiketleri ORDER BY etiket")
-        return self.yerel_imlec.fetchall()
-
-    # ==================== HATIRLATICILAR ====================
-
-    def hatirlatici_ekle(self, sikayet_id, kullanici_id, kullanici_adi, hatirlatma_tarihi, mesaj):
-        tarih = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.yerel_imlec.execute("""
-            INSERT INTO hatirlaticilar (sikayet_id, kullanici_id, kullanici_adi, hatirlatma_tarihi, mesaj, tamamlandi, olusturma_tarihi, senkronize)
-            VALUES (?, ?, ?, ?, ?, 0, ?, 0)
-        """, (sikayet_id, kullanici_id, kullanici_adi, hatirlatma_tarihi, mesaj, tarih))
-        self.yerel_baglanti.commit()
-        return self.yerel_imlec.lastrowid
-
-    def hatirlaticilari_getir(self, sikayet_id=None, sadece_aktif=True):
-        if sikayet_id:
-            if sadece_aktif:
-                self.yerel_imlec.execute("""
-                    SELECT h.id, h.sikayet_id, h.kullanici_adi, h.hatirlatma_tarihi, h.mesaj, h.tamamlandi, s.sikayet_no, s.yolcu_adi
-                    FROM hatirlaticilar h
-                    LEFT JOIN sikayetler s ON h.sikayet_id = s.id
-                    WHERE h.sikayet_id = ? AND h.tamamlandi = 0 ORDER BY h.hatirlatma_tarihi
-                """, (sikayet_id,))
-            else:
-                self.yerel_imlec.execute("""
-                    SELECT h.id, h.sikayet_id, h.kullanici_adi, h.hatirlatma_tarihi, h.mesaj, h.tamamlandi, s.sikayet_no, s.yolcu_adi
-                    FROM hatirlaticilar h
-                    LEFT JOIN sikayetler s ON h.sikayet_id = s.id
-                    WHERE h.sikayet_id = ? ORDER BY h.hatirlatma_tarihi
-                """, (sikayet_id,))
-        else:
-            if sadece_aktif:
-                self.yerel_imlec.execute("""
-                    SELECT h.id, h.sikayet_id, h.kullanici_adi, h.hatirlatma_tarihi, h.mesaj, h.tamamlandi, s.sikayet_no, s.yolcu_adi
-                    FROM hatirlaticilar h
-                    LEFT JOIN sikayetler s ON h.sikayet_id = s.id
-                    WHERE h.tamamlandi = 0 ORDER BY h.hatirlatma_tarihi
-                """)
-            else:
-                self.yerel_imlec.execute("""
-                    SELECT h.id, h.sikayet_id, h.kullanici_adi, h.hatirlatma_tarihi, h.mesaj, h.tamamlandi, s.sikayet_no, s.yolcu_adi
-                    FROM hatirlaticilar h
-                    LEFT JOIN sikayetler s ON h.sikayet_id = s.id
-                    ORDER BY h.hatirlatma_tarihi
-                """)
-        return self.yerel_imlec.fetchall()
+    def hatirlaticilari_getir(self, kullanici_id=None):
+        # Sadece aktif hatırlatıcıları getir
+        self.imlec.execute("""
+            SELECT h.id, h.not_metni, h.hedef_tarih, s.sikayet_no, s.yolcu_adi 
+            FROM hatirlaticilar h 
+            LEFT JOIN sikayetler s ON h.sikayet_id = s.id 
+            WHERE h.durum='Aktif' ORDER BY h.hedef_tarih ASC
+        """)
+        return self.imlec.fetchall()
 
     def hatirlatici_tamamla(self, hatirlatici_id):
-        self.yerel_imlec.execute("UPDATE hatirlaticilar SET tamamlandi = 1 WHERE id = ?", (hatirlatici_id,))
-        self.yerel_baglanti.commit()
+        self.imlec.execute("UPDATE hatirlaticilar SET durum='Tamamlandı' WHERE id=?", (hatirlatici_id,))
+        self.baglanti.commit()
 
     def hatirlatici_sil(self, hatirlatici_id):
-        self.yerel_imlec.execute("DELETE FROM hatirlaticilar WHERE id = ?", (hatirlatici_id,))
-        self.yerel_baglanti.commit()
+        self.imlec.execute("DELETE FROM hatirlaticilar WHERE id=?", (hatirlatici_id,))
+        self.baglanti.commit()
 
-    def bekleyen_hatirlaticilari_getir(self):
-        """Bugün veya geçmiş tarihli aktif hatırlatıcıları getir"""
-        bugun = datetime.datetime.now().strftime("%Y-%m-%d")
-        self.yerel_imlec.execute("""
-            SELECT h.id, h.sikayet_id, h.kullanici_adi, h.hatirlatma_tarihi, h.mesaj, s.sikayet_no, s.yolcu_adi, s.durum
-            FROM hatirlaticilar h
-            LEFT JOIN sikayetler s ON h.sikayet_id = s.id
-            WHERE h.tamamlandi = 0 AND DATE(h.hatirlatma_tarihi) <= DATE(?)
-            ORDER BY h.hatirlatma_tarihi
-        """, (bugun,))
-        return self.yerel_imlec.fetchall()
+    def islem_gecmisini_getir(self, limit=100):
+        self.imlec.execute(f"SELECT * FROM islem_gecmisi ORDER BY id DESC LIMIT {limit}")
+        return self.imlec.fetchall()
 
-    def bekleyen_sikayetleri_getir(self, gun_siniri=3):
-        """Belirli gün sayısından fazla bekleyen çözülmemiş şikayetleri getir"""
-        sinir_tarih = (datetime.datetime.now() - datetime.timedelta(days=gun_siniri)).strftime("%Y-%m-%d %H:%M:%S")
-        self.yerel_imlec.execute("""
-            SELECT id, sikayet_no, yolcu_adi, kayit_tarihi, durum, sikayet_turu
-            FROM sikayetler
-            WHERE durum != 'Çözüldü' AND kayit_tarihi < ?
-            ORDER BY kayit_tarihi
-        """, (sinir_tarih,))
-        return self.yerel_imlec.fetchall()
+    def cop_kutusuna_tasi(self, sikayet_id, user_id, user_name):
+        self.sikayet_sil(sikayet_id)
+        return True, "Sikayet silindi"
 
-    # ==================== YEDEKLEME ====================
-
-    def yedekleme_klasoru_olustur(self):
-        yedek_klasor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yedekler")
-        if not os.path.exists(yedek_klasor):
-            os.makedirs(yedek_klasor)
-        return yedek_klasor
-
-    def yedek_al(self, manuel=False):
-        bekleyen = self._bekleyen_islem_sayisi()
-        if self.online_mod:
-            return True, f"☁️ Supabase bulut veritabanı + Yerel yedek. Bekleyen: {bekleyen}"
-        else:
-            return True, f"📁 Yerel veritabanına kaydedildi. Bekleyen senkronizasyon: {bekleyen}"
-
-    def eski_yedekleri_temizle(self, yedek_klasor, gun_sayisi=30):
-        pass
-
-    def yedekleri_listele(self):
-        bekleyen = self._bekleyen_islem_sayisi()
-        return [{
-            "dosya": f"Hibrit Mod ({'Çevrimiçi' if self.online_mod else 'Çevrimdışı'})",
-            "yol": self.db_adi,
-            "boyut": os.path.getsize(self.db_adi) if os.path.exists(self.db_adi) else 0,
-            "tarih": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "tip": f"Bekleyen: {bekleyen}"
-        }]
-
-    def yedekten_geri_yukle(self, yedek_yolu):
-        return False, "Hibrit modda yedekten geri yükleme desteklenmiyor"
-
-    def son_yedek_tarihi(self):
-        return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # --- YEDEKLEME ---
+    def yedek_al(self, manuel=True):
+        try:
+            klasor = "yedekler"
+            if not os.path.exists(klasor): os.makedirs(klasor)
+            ad = f"yedek_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            hedef = os.path.join(klasor, ad)
+            shutil.copy2(self.db_adi, hedef)
+            return True, hedef
+        except Exception as e: return False, str(e)
 
     def gunluk_yedek_gerekli_mi(self):
-        return False
-
-    # ==================== ÇÖP KUTUSU FONKSİYONLARI ====================
+        klasor = "yedekler"
+        if not os.path.exists(klasor): return True
+        bugun = datetime.datetime.now().strftime("%Y%m%d")
+        for f in os.listdir(klasor):
+            if f.startswith(f"yedek_{bugun}"): return False
+        return True
     
-    def cop_kutusuna_tasi(self, sikayet_id, kullanici_id=None, kullanici_adi=None):
-        """Şikayeti çöp kutusuna taşı (silmek yerine)"""
+    def get_statistics(self):
+        """Dashboard için istatistikler"""
         try:
-            # Önce bulut_id'yi al
-            self.yerel_imlec.execute("SELECT bulut_id FROM sikayetler WHERE id = ?", (sikayet_id,))
-            bulut_result = self.yerel_imlec.fetchone()
-            bulut_id = bulut_result[0] if bulut_result else None
+            stats = {}
+            # Toplam
+            self.imlec.execute("SELECT COUNT(*) FROM sikayetler")
+            stats['total'] = self.imlec.fetchone()[0]
             
-            # Şikayeti al (satin_alinan_yer dahil)
-            self.yerel_imlec.execute("""
-                SELECT sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, 
-                       platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, 
-                       plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer
-                FROM sikayetler WHERE id = ?
-            """, (sikayet_id,))
-            sikayet = self.yerel_imlec.fetchone()
+            # Açık (Yeni + İşlemde)
+            self.imlec.execute("SELECT COUNT(*) FROM sikayetler WHERE durum IN ('Yeni', 'İşlemde')")
+            stats['open'] = self.imlec.fetchone()[0]
             
-            if not sikayet:
-                return False, "Şikayet bulunamadı"
+            # Kapalı
+            self.imlec.execute("SELECT COUNT(*) FROM sikayetler WHERE durum='Kapalı'")
+            stats['closed'] = self.imlec.fetchone()[0]
             
-            silinme_tarihi = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            # Acil
+            self.imlec.execute("SELECT COUNT(*) FROM sikayetler WHERE oncelik='Acil'")
+            stats['urgent'] = self.imlec.fetchone()[0]
             
-            # Çöp kutusuna ekle (satin_alinan_yer dahil)
-            self.yerel_imlec.execute("""
-                INSERT INTO cop_kutusu (sikayet_id, sikayet_no, yolcu_adi, seyahat_tarihi, 
-                    guzergah, pnr, iletisim, platform, sikayet_detay, kayit_tarihi, durum,
-                    telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer,
-                    silinme_tarihi, silen_kullanici_id, silen_kullanici_adi)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (sikayet_id, sikayet[0], sikayet[1], sikayet[2], sikayet[3], sikayet[4],
-                  sikayet[5], sikayet[6], sikayet[7], sikayet[8], sikayet[9], sikayet[10],
-                  sikayet[11], sikayet[12], sikayet[13], sikayet[14], sikayet[15], sikayet[16],
-                  silinme_tarihi, kullanici_id, kullanici_adi))
-            
-            # İşlemleri çöp kutusuna taşımadan sil (isteğe bağlı)
-            self.yerel_imlec.execute("DELETE FROM sikayet_islemleri WHERE sikayet_id = ?", (sikayet_id,))
-            self.yerel_imlec.execute("DELETE FROM sikayet_notlari WHERE sikayet_id = ?", (sikayet_id,))
-            self.yerel_imlec.execute("DELETE FROM sikayet_dosyalari WHERE sikayet_id = ?", (sikayet_id,))
-            self.yerel_imlec.execute("DELETE FROM sikayet_etiketleri WHERE sikayet_id = ?", (sikayet_id,))
-            self.yerel_imlec.execute("DELETE FROM hatirlaticilar WHERE sikayet_id = ?", (sikayet_id,))
-            
-            # Şikayeti ana tablodan sil
-            self.yerel_imlec.execute("DELETE FROM sikayetler WHERE id = ?", (sikayet_id,))
-            self.yerel_baglanti.commit()
-            
-            # Buluttan da sil (senkronizasyon sorunu olmaması için)
-            if self.online_mod and bulut_id:
-                try:
-                    self.bulut_imlec.execute("DELETE FROM sikayet_islemleri WHERE sikayet_id = %s", (bulut_id,))
-                    self.bulut_imlec.execute("DELETE FROM sikayetler WHERE id = %s", (bulut_id,))
-                    self.bulut_baglanti.commit()
-                except Exception as e:
-                    print(f"Bulut silme hatası: {e}")
-                    self.bulut_baglanti.rollback()
-            
-            return True, "Şikayet çöp kutusuna taşındı"
+            return stats
         except Exception as e:
-            self.yerel_baglanti.rollback()
-            return False, f"Hata: {str(e)}"
-
-    def cop_kutusundan_geri_al(self, cop_id):
-        """Çöp kutusundan şikayeti geri yükle"""
-        try:
-            # Çöp kutusundan veriyi al (satin_alinan_yer dahil)
-            self.yerel_imlec.execute("""
-                SELECT sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, 
-                       platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, 
-                       plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer
-                FROM cop_kutusu WHERE id = ?
-            """, (cop_id,))
-            sikayet = self.yerel_imlec.fetchone()
-            
-            if not sikayet:
-                return False, "Kayıt bulunamadı"
-            
-            # Şikayetler tablosuna geri ekle (satin_alinan_yer dahil)
-            self.yerel_imlec.execute("""
-                INSERT INTO sikayetler (sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr,
-                    iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta,
-                    plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer, senkronize)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-            """, sikayet)
-            
-            # Çöp kutusundan sil
-            self.yerel_imlec.execute("DELETE FROM cop_kutusu WHERE id = ?", (cop_id,))
-            self.yerel_baglanti.commit()
-            
-            return True, "Şikayet geri yüklendi"
-        except Exception as e:
-            self.yerel_baglanti.rollback()
-            return False, f"Hata: {str(e)}"
-
-    def cop_kutusunu_bosalt(self):
-        """Çöp kutusundaki tüm kayıtları kalıcı olarak sil"""
-        try:
-            self.yerel_imlec.execute("DELETE FROM cop_kutusu")
-            self.yerel_baglanti.commit()
-            return True, "Çöp kutusu boşaltıldı"
-        except Exception as e:
-            self.yerel_baglanti.rollback()
-            return False, f"Hata: {str(e)}"
-
-    def cop_kutusunu_getir(self):
-        """Çöp kutusundaki tüm kayıtları getir"""
-        self.yerel_imlec.execute("""
-            SELECT id, sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, sikayet_detay,
-                   durum, silinme_tarihi, silen_kullanici_adi
-            FROM cop_kutusu ORDER BY silinme_tarihi DESC
-        """)
-        return self.yerel_imlec.fetchall()
-
-    def cop_kutusundan_kalici_sil(self, cop_id):
-        """Çöp kutusundan tek bir kaydı kalıcı olarak sil"""
-        try:
-            self.yerel_imlec.execute("DELETE FROM cop_kutusu WHERE id = ?", (cop_id,))
-            self.yerel_baglanti.commit()
-            return True, "Kayıt kalıcı olarak silindi"
-        except Exception as e:
-            self.yerel_baglanti.rollback()
-            return False, f"Hata: {str(e)}"
-
-    def kapat(self):
-        if self.yerel_imlec:
-            self.yerel_imlec.close()
-        if self.yerel_baglanti:
-            self.yerel_baglanti.close()
-        if self.bulut_imlec:
-            self.bulut_imlec.close()
-        if self.bulut_baglanti:
-            self.bulut_baglanti.close()
+            print(f"İstatistik hatası: {e}")
+            return {'total': 0, 'open': 0, 'closed': 0, 'urgent': 0}

@@ -40,6 +40,49 @@ def show_message(msg_type, title, message, parent=None):
     elif msg_type == "yesno":
         return messagebox.askyesno(title, message, parent=parent)
 from veritabani_hybrid import VeritabaniYonetici
+from ui_components import PremiumButton, ToastNotification, SkeletonCard
+from animation_utils import AnimationController
+from ux_components import (TarihSecici, TelefonGirisi, TCKimlikGirisi, 
+                            EmailGirisi, LoadingSpinner, Breadcrumb, 
+                            ProgressBar, EmptyState)
+
+# YENİ MODÜLLER - Gelişmiş Özellikler (Opsiyonel)
+try:
+    from ai_kategorizasyon import AIKategorizasyon
+    AI_AKTIF = True
+except ImportError:
+    AI_AKTIF = False
+    print("⚠️ AI modülü yüklenemedi. 'pip install google-generativeai' komutu ile yükleyin.")
+
+try:
+    from dashboard_grafikleri import DashboardGrafikleri
+    GRAFIK_AKTIF = True
+except ImportError:
+    GRAFIK_AKTIF = False
+    print("⚠️ Grafik modülü yüklenemedi. 'pip install matplotlib' komutu ile yükleyin.")
+
+try:
+    from excel_raporlama import ExcelRaporlama
+    EXCEL_AKTIF = True
+except ImportError:
+    EXCEL_AKTIF = False
+    print("⚠️ Excel modülü yüklenemedi. 'pip install openpyxl' komutu ile yükleyin.")
+
+try:
+    from sla_yonetimi import SLAYonetimi
+    SLA_AKTIF = True
+except ImportError:
+    SLA_AKTIF = False
+    print("⚠️ SLA modülü yüklenemedi.")
+
+try:
+    from whatsapp_entegrasyonu import WhatsAppEntegrasyonu
+    WHATSAPP_AKTIF = True
+except ImportError:
+    WHATSAPP_AKTIF = False
+    print("⚠️ WhatsApp modülü yüklenemedi. 'pip install twilio' komutu ile yükleyin.")
+
+import threading
 from PIL import Image, ImageTk
 import os
 from reportlab.pdfgen import canvas
@@ -51,6 +94,10 @@ from reportlab.lib.utils import ImageReader
 # Modern arayüz ayarları
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
+
+
+
+
 
 
 class YeniSikayetPenceresi(ctk.CTkFrame):
@@ -76,6 +123,18 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
         
         ctk.CTkLabel(header, text=baslik_text, font=ctk.CTkFont(size=20, weight="bold")).pack(side="left", padx=10, pady=15)
         
+        # Breadcrumb navigasyon
+        breadcrumb_frame = ctk.CTkFrame(self, height=35, corner_radius=0, fg_color=("gray90", "gray20"))
+        breadcrumb_frame.pack(fill="x")
+        breadcrumb_frame.pack_propagate(False)
+        
+        breadcrumb_path = [
+            {"text": "Ana Sayfa", "command": lambda: controller.show_frame("AnaEkran")},
+            {"text": "Şikayet Arşivi", "command": lambda: controller.show_frame("SikayetArsivi")},
+            {"text": "Düzenle" if duzenlenecek_kayit else "Yeni Şikayet"}
+        ]
+        Breadcrumb(breadcrumb_frame, breadcrumb_path).pack(side="left", padx=15, pady=5)
+        
         # Ana Scrollable Frame
         self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=(10, 0))
@@ -83,14 +142,32 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
         # --- YOLCU BİLGİLERİ ---
         self.baslik_olustur("Yolcu Bilgileri")
         
-        self.entry_yolcu = self.form_alani_olustur("Ad Soyad *", "Örn: Ahmet Yılmaz")
+        # Ad Soyad ve TC Kimlik yan yana
+        row_yolcu = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
+        row_yolcu.pack(fill="x", pady=(0, 10))
+        
+        self.entry_yolcu = self.form_alani_olustur("Ad Soyad *", "Örn: Ahmet Yılmaz", parent=row_yolcu, side="left", padding=(0, 5))
+        # TC Kimlik - Yeni UX bileşeni (validasyonlu)
+        tc_container = ctk.CTkFrame(row_yolcu, fg_color="transparent")
+        tc_container.pack(side="right", fill="x", expand=True, padx=(5, 0))
+        self.entry_tc = TCKimlikGirisi(tc_container, "TC Kimlik No")
+        self.entry_tc.pack(fill="x")
         
         # Telefon ve E-posta yan yana
         row_iletisim = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
         row_iletisim.pack(fill="x", pady=(0, 10))
         
-        self.entry_telefon = self.form_alani_olustur("Telefon *", "0555 123 45 67", parent=row_iletisim, side="left", padding=(0, 5))
-        self.entry_eposta = self.form_alani_olustur("E-posta", "ornek@email.com", parent=row_iletisim, side="right", padding=(5, 0))
+        # Telefon - Yeni UX bileşeni (otomatik formatlama)
+        telefon_container = ctk.CTkFrame(row_iletisim, fg_color="transparent")
+        telefon_container.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.entry_telefon = TelefonGirisi(telefon_container, "Telefon *")
+        self.entry_telefon.pack(fill="x")
+        
+        # E-posta - Yeni UX bileşeni (validasyonlu)
+        eposta_container = ctk.CTkFrame(row_iletisim, fg_color="transparent")
+        eposta_container.pack(side="right", fill="x", expand=True, padx=(5, 0))
+        self.entry_eposta = EmailGirisi(eposta_container, "E-posta")
+        self.entry_eposta.pack(fill="x")
 
         # --- SEFER BİLGİLERİ ---
         self.baslik_olustur("Sefer Bilgileri")
@@ -99,13 +176,18 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
         row_sefer1 = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
         row_sefer1.pack(fill="x", pady=(0, 10))
         self.entry_guzergah = self.form_alani_olustur("Güzergah *", "Örn: İstanbul - Ankara", parent=row_sefer1, side="left", padding=(0, 5))
-        self.entry_tarih = self.form_alani_olustur("Sefer Tarihi *", "gg.aa.yyyy", parent=row_sefer1, side="right", padding=(5, 0))
+        # Tarih - Yeni UX bileşeni (takvim seçici)
+        tarih_container = ctk.CTkFrame(row_sefer1, fg_color="transparent")
+        tarih_container.pack(side="right", fill="x", expand=True, padx=(5, 0))
+        self.entry_tarih = TarihSecici(tarih_container, "Sefer Tarihi *")
+        self.entry_tarih.pack(fill="x")
         
-        # Plaka ve PNR yan yana
+        # Plaka, PNR ve Koltuk yan yana
         row_sefer2 = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
         row_sefer2.pack(fill="x", pady=(0, 10))
         self.entry_plaka = self.form_alani_olustur("Otobüs Plakası", "Örn: 34 ABC 123", parent=row_sefer2, side="left", padding=(0, 5))
-        self.entry_pnr = self.form_alani_olustur("PNR Numarası", "PNR No", parent=row_sefer2, side="right", padding=(5, 0))
+        self.entry_pnr = self.form_alani_olustur("PNR Numarası", "PNR No", parent=row_sefer2, side="left", padding=(5, 5))
+        self.entry_koltuk = self.form_alani_olustur("Koltuk No", "No", parent=row_sefer2, side="right", padding=(5, 0))
 
         # Satın Alınan Yer (Şube/Platform)
         satin_alma_yerleri = [
@@ -178,6 +260,14 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
         # Combo değişikliğini izle
         self.combo_basvurulan_yer.configure(command=self.basvurulan_degisti)
         
+        # --- ŞİKAYET METNİ VE YAPAY ZEKA ANALİZİ ---
+        ctk.CTkLabel(self.scroll_frame, text="Şikayet Metni *", font=ctk.CTkFont(size=12, weight="bold"), anchor="w").pack(fill="x", pady=(15, 5))
+        
+
+        
+        self.text_sikayet = ctk.CTkTextbox(self.scroll_frame, height=120)
+        self.text_sikayet.pack(fill="x", pady=(0, 10))
+        
         # Bilet Ücreti
         self.entry_bilet_ucreti = self.form_alani_olustur("Bilet Ücreti (TL)", "Örn: 450")
         
@@ -185,10 +275,7 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
         self.combo_oncelik = self.combo_alani_olustur("Öncelik *", ["Düşük", "Orta", "Yüksek", "Acil"])
         self.combo_oncelik.set("Orta")
         
-        # Açıklama
-        ctk.CTkLabel(self.scroll_frame, text="Şikayet Açıklaması *", font=ctk.CTkFont(size=12, weight="bold"), anchor="w").pack(fill="x", pady=(5, 5))
-        self.text_sikayet = ctk.CTkTextbox(self.scroll_frame, height=120, border_width=1, border_color="gray")
-        self.text_sikayet.pack(fill="x", pady=(0, 20))
+
         
         # --- BUTONLAR ---
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -209,6 +296,10 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
             # Pencere tam yüklendikten sonra verileri doldur
             self.after(300, self.verileri_doldur)
 
+
+
+
+
     def verileri_doldur(self):
         try:
             k = self.duzenlenecek_kayit
@@ -224,10 +315,9 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
                 self.entry_yolcu.delete(0, "end")
                 self.entry_yolcu.insert(0, str(k[2]))
             
-            # Seyahat Tarihi - index 3
+            # Seyahat Tarihi - index 3 (Yeni tarih seçici)
             if k[3]:
-                self.entry_tarih.delete(0, "end")
-                self.entry_tarih.insert(0, str(k[3]))
+                self.entry_tarih.set_date(str(k[3]))
             
             # Güzergah - index 4
             if k[4]:
@@ -274,7 +364,6 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
                     self.entry_diger_satin_alinan.insert(0, diger_metin)
                 else:
                     self.combo_satin_alinan_yer.set(satin_alinan)
-            
             # Başvurulan Yer - index 18
             if len(k) > 18 and k[18]:
                 basvurulan = str(k[18])
@@ -287,6 +376,16 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
                     self.entry_diger_basvurulan.insert(0, diger_metin)
                 else:
                     self.combo_basvurulan_yer.set(basvurulan)
+            
+            # TC Kimlik - index 20
+            if len(k) > 20 and k[20]:
+                self.entry_tc.delete(0, "end")
+                self.entry_tc.insert(0, str(k[20]))
+                
+            # Koltuk No - index 21
+            if len(k) > 21 and k[21]:
+                self.entry_koltuk.delete(0, "end")
+                self.entry_koltuk.insert(0, str(k[21]))
             
             # Bilet Ücreti - index 19
             if len(k) > 19 and k[19]:
@@ -379,12 +478,14 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
 
     def kaydet(self):
         yolcu = self.entry_yolcu.get().strip()
+        tc_kimlik = self.entry_tc.get().strip()
         telefon = self.entry_telefon.get().strip()
         eposta = self.entry_eposta.get().strip()
         guzergah = self.entry_guzergah.get().strip()
         tarih = self.entry_tarih.get().strip()
         plaka = self.entry_plaka.get().strip()
         pnr = self.entry_pnr.get().strip()
+        koltuk_no = self.entry_koltuk.get().strip()
         tur = self.combo_tur.get()
         oncelik = self.combo_oncelik.get()
         detay = self.text_sikayet.get("1.0", tk.END).strip()
@@ -410,157 +511,202 @@ class YeniSikayetPenceresi(ctk.CTkFrame):
         
         if basvurulan_yer == "Seçiniz":
             basvurulan_yer = ""
+            
+        # Lokasyon (Eksik değişken tanımı düzeltildi)
+        lokasyon = ""
         
         # Bilet ücreti
         bilet_ucreti = self.entry_bilet_ucreti.get().strip()
 
         # Zorunlu alan kontrolü
+        # Zorunlu alan kontrolü
         if not yolcu or not detay:
             self.lift()
             self.focus_force()
-            messagebox.showwarning("Eksik Bilgi", "Lütfen zorunlu alanları doldurunuz.", parent=self)
+            
+            # Animasyonlu uyarı
+            if not yolcu: AnimationController.shake_widget(self.entry_yolcu)
+            if not detay: AnimationController.shake_widget(self.text_sikayet)
+            
+            try:
+                if self.controller:
+                    ToastNotification(self.controller, "Eksik Bilgi", "Lütfen zorunlu alanları doldurunuz.", icon="⚠️", color="#e74c3c")
+            except: pass
             return
         
-        # Tarih formatı kontrolü (gg.aa.yyyy veya yyyy-mm-dd)
-        if tarih:
-            import re
-            tarih_pattern1 = r'^\d{2}\.\d{2}\.\d{4}$'  # gg.aa.yyyy
-            tarih_pattern2 = r'^\d{4}-\d{2}-\d{2}$'    # yyyy-mm-dd
-            if not (re.match(tarih_pattern1, tarih) or re.match(tarih_pattern2, tarih)):
-                self.lift()
-                self.focus_force()
-                messagebox.showwarning("Hatalı Tarih", "Tarih formatı hatalı!\nDoğru format: gg.aa.yyyy veya yyyy-mm-dd", parent=self)
-                return
         
-        # Telefon formatı kontrolü (en az 10 rakam)
-        if telefon:
-            telefon_temiz = ''.join(filter(str.isdigit, telefon))
-            if len(telefon_temiz) < 10:
-                self.lift()
-                self.focus_force()
-                messagebox.showwarning("Hatalı Telefon", "Telefon numarası en az 10 haneli olmalıdır.", parent=self)
-                return
+        # NOT: Tarih, telefon ve e-posta validasyonları artık widget'lar tarafından otomatik yapılıyor
         
-        # E-posta formatı kontrolü
-        if eposta:
-            import re
-            email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-            if not re.match(email_pattern, eposta):
-                self.lift()
-                self.focus_force()
-                messagebox.showwarning("Hatalı E-posta", "E-posta adresi geçersiz!", parent=self)
-                return
+        # Loading spinner göster
+        self.loading_overlay = ctk.CTkFrame(
+            self,
+            fg_color=("white", "gray17"),
+            corner_radius=0
+        )
+        self.loading_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
         
-        # Çift şikayet kontrolü (sadece yeni kayıtlarda)
-        if not self.duzenlenecek_kayit and yolcu and tarih and guzergah:
-            self.db.imlec.execute("""
-                SELECT sikayet_no FROM sikayetler 
-                WHERE yolcu_adi = ? AND seyahat_tarihi = ? AND guzergah = ?
-            """, (yolcu, tarih, guzergah))
-            benzer = self.db.imlec.fetchone()
-            if benzer:
-                self.lift()
-                self.focus_force()
-                devam = messagebox.askyesno(
-                    "Benzer Şikayet Bulundu",
-                    f"Bu yolcu için aynı tarih ve güzergahta başka bir şikayet mevcut:\n{benzer[0]}\n\nYine de kaydetmek istiyor musunuz?"
+        spinner = LoadingSpinner(self.loading_overlay, text="Kaydediliyor...")
+        spinner.place(relx=0.5, rely=0.5, anchor="center")
+        
+        # UI'yi güncelle
+        self.update()
+        
+        # Kaydetme işlemini asenkron yap
+        def kaydet_islem():
+            try:
+                self._kaydet_veritabani(
+                    yolcu, tc_kimlik, telefon, eposta, guzergah, tarih,
+                    plaka, pnr, koltuk_no, tur, oncelik, detay,
+                    satin_alinan_yer, basvurulan_yer, lokasyon, bilet_ucreti
                 )
-                if not devam:
-                    return
+            finally:
+                # Loading'i kaldır
+                self.after(0, lambda: self.loading_overlay.destroy())
+        
+        # Thread'de çalıştır
+        threading.Thread(target=kaydet_islem, daemon=True).start()
+    
+    def _kaydet_veritabani(self, yolcu, tc_kimlik, telefon, eposta, guzergah, tarih,
+                           plaka, pnr, koltuk_no, tur, oncelik, detay,
+                           satin_alinan_yer, basvurulan_yer, lokasyon, bilet_ucreti):
+        """Veritabanına kaydetme işlemi"""
+        try:
+            # Çift şikayet kontrolü (sadece yeni kayıtlarda)
+            if not self.duzenlenecek_kayit and yolcu and tarih and guzergah:
+                self.db.imlec.execute("""
+                    SELECT sikayet_no FROM sikayetler 
+                    WHERE yolcu_adi = ? AND seyahat_tarihi = ? AND guzergah = ?
+                """, (yolcu, tarih, guzergah))
+                benzer = self.db.imlec.fetchone()
+                if benzer:
+                    self.lift()
+                    self.focus_force()
+                    devam = messagebox.askyesno(
+                        "Benzer Şikayet Bulundu",
+                        f"Bu yolcu için aynı tarih ve güzergahta başka bir şikayet mevcut:\n{benzer[0]}\n\nYine de kaydetmek istiyor musunuz?"
+                    )
+                    if not devam:
+                        return
 
-        # İletişim bilgisini birleştir (Eski yapı uyumluluğu için)
-        iletisim = f"{telefon} / {eposta}"
-        
-        if self.duzenlenecek_kayit:
-            # Güncelleme
-            self.db.sikayet_guncelle(
-                id=self.duzenlenecek_kayit[0],
-                yolcu_adi=yolcu,
-                seyahat_tarihi=tarih,
-                guzergah=guzergah,
-                pnr=pnr,
-                iletisim=iletisim,
-                platform="Uygulama",
-                sikayet_detay=detay,
-                telefon=telefon,
-                eposta=eposta,
-                plaka=plaka,
-                sikayet_turu=tur,
-                lokasyon="",
-                oncelik=oncelik,
-                satin_alinan_yer=satin_alinan_yer,
-                basvurulan_yer=basvurulan_yer,
-                bilet_ucreti=bilet_ucreti
-            )
-            mesaj = "Şikayet başarıyla güncellendi."
+            # İletişim bilgisini birleştir (Eski yapı uyumluluğu için)
+            iletisim = f"{telefon} / {eposta}"
             
-            # İşlem kaydı
-            if hasattr(self.controller, 'aktif_kullanici') and self.controller.aktif_kullanici:
-                self.db.islem_kaydet(
-                    kullanici_id=self.controller.aktif_kullanici.get('id'),
-                    kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
-                    islem_turu="ŞİKAYET GÜNCELLEME",
-                    islem_detay=f"{yolcu} - {tur}",
-                    ilgili_kayit_id=self.duzenlenecek_kayit[0],
-                    ilgili_kayit_no=self.duzenlenecek_kayit[1]
+            if self.duzenlenecek_kayit:
+                # Güncelleme
+                self.db.sikayet_guncelle(
+                    id=self.duzenlenecek_kayit[0],
+                    yolcu_adi=yolcu,
+                    seyahat_tarihi=tarih,
+                    guzergah=guzergah,
+                    pnr=pnr,
+                    iletisim=iletisim,
+                    platform="Uygulama",
+                    sikayet_detay=detay,
+                    telefon=telefon,
+                    eposta=eposta,
+                    plaka=plaka,
+                    sikayet_turu=tur,
+                    lokasyon="",
+                    oncelik=oncelik,
+                    satin_alinan_yer=satin_alinan_yer,
+                    basvurulan_yer=basvurulan_yer,
+                    bilet_ucreti=bilet_ucreti,
+                    tc_kimlik=tc_kimlik,
+                    koltuk_no=koltuk_no
                 )
-                # Şikayet işlemleri tablosuna da ekle
-                self.db.sikayet_islemi_ekle(
-                    sikayet_id=self.duzenlenecek_kayit[0],
-                    kullanici_id=self.controller.aktif_kullanici.get('id'),
-                    kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
-                    islem_turu="GÜNCELLEME",
-                    aciklama=f"Şikayet bilgileri güncellendi"
-                )
-        else:
-            # Yeni Kayıt
-            self.db.sikayet_ekle(
-                yolcu_adi=yolcu,
-                seyahat_tarihi=tarih,
-                guzergah=guzergah,
-                pnr=pnr,
-                iletisim=iletisim,
-                platform="Uygulama", # Varsayılan
-                sikayet_detay=detay,
-                telefon=telefon,
-                eposta=eposta,
-                plaka=plaka,
-                sikayet_turu=tur,
-                lokasyon="",
-                oncelik=oncelik,
-                satin_alinan_yer=satin_alinan_yer,
-                basvurulan_yer=basvurulan_yer,
-                bilet_ucreti=bilet_ucreti
-            )
-            mesaj = "Şikayet başarıyla kaydedildi."
-            
-            # Son eklenen şikayet ID ve numarasını al
-            self.db.imlec.execute("SELECT id, sikayet_no FROM sikayetler ORDER BY id DESC LIMIT 1")
-            son_sikayet = self.db.imlec.fetchone()
-            sikayet_id = son_sikayet[0] if son_sikayet else None
-            sikayet_no = son_sikayet[1] if son_sikayet else ""
-            
-            # İşlem kaydı
-            if hasattr(self.controller, 'aktif_kullanici') and self.controller.aktif_kullanici:
-                self.db.islem_kaydet(
-                    kullanici_id=self.controller.aktif_kullanici.get('id'),
-                    kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
-                    islem_turu="YENİ ŞİKAYET",
-                    islem_detay=f"{yolcu} - {tur}",
-                    ilgili_kayit_no=sikayet_no
-                )
-                # Şikayet işlemleri tablosuna da ekle
-                if sikayet_id:
-                    self.db.sikayet_islemi_ekle(
-                        sikayet_id=sikayet_id,
+                mesaj = "Şikayet başarıyla güncellendi."
+                
+                # İşlem kaydı
+                if hasattr(self.controller, 'aktif_kullanici') and self.controller.aktif_kullanici:
+                    self.db.islem_kaydet(
                         kullanici_id=self.controller.aktif_kullanici.get('id'),
                         kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
-                        islem_turu="OLUŞTURULDU",
-                        aciklama=f"Şikayet kaydı oluşturuldu"
+                        islem_turu="ŞİKAYET GÜNCELLEME",
+                        islem_detay=f"{yolcu} - {tur}",
+                        ilgili_kayit_id=self.duzenlenecek_kayit[0],
+                        ilgili_kayit_no=self.duzenlenecek_kayit[1]
                     )
-        
-        self.callback_yenile()
-        self.geri_don()
+                    # Şikayet işlemleri tablosuna da ekle
+                    self.db.sikayet_islemi_ekle(
+                        sikayet_id=self.duzenlenecek_kayit[0],
+                        kullanici_id=self.controller.aktif_kullanici.get('id'),
+                        kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
+                        islem_turu="GÜNCELLEME",
+                        aciklama=f"Şikayet bilgileri güncellendi"
+                    )
+            else:
+                # Yeni Kayıt
+                self.db.sikayet_ekle(
+                    yolcu_adi=yolcu,
+                    seyahat_tarihi=tarih,
+                    guzergah=guzergah,
+                    pnr=pnr,
+                    iletisim=iletisim,
+                    platform="Uygulama", # Varsayılan
+                    sikayet_detay=detay,
+                    telefon=telefon,
+                    eposta=eposta,
+                    plaka=plaka,
+                    sikayet_turu=tur,
+                    lokasyon=lokasyon,
+                    oncelik=oncelik,
+                    satin_alinan_yer=satin_alinan_yer,
+                    basvurulan_yer=basvurulan_yer,
+                    bilet_ucreti=bilet_ucreti,
+                    tc_kimlik=tc_kimlik,
+                    koltuk_no=koltuk_no
+                )
+
+                mesaj = "Şikayet başarıyla kaydedildi."
+                
+                # Son eklenen şikayet ID ve numarasını al
+                self.db.imlec.execute("SELECT id, sikayet_no FROM sikayetler ORDER BY id DESC LIMIT 1")
+                son_sikayet = self.db.imlec.fetchone()
+                sikayet_id = son_sikayet[0] if son_sikayet else None
+                sikayet_no = son_sikayet[1] if son_sikayet else ""
+                
+                # İşlem kaydı
+                if hasattr(self.controller, 'aktif_kullanici') and self.controller.aktif_kullanici:
+                    self.db.islem_kaydet(
+                        kullanici_id=self.controller.aktif_kullanici.get('id'),
+                        kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
+                        islem_turu="YENİ ŞİKAYET",
+                        islem_detay=f"{yolcu} - {tur}",
+                        ilgili_kayit_no=sikayet_no
+                    )
+                    # Şikayet işlemleri tablosuna da ekle
+                    if sikayet_id:
+                        try:
+                            self.db.sikayet_islemi_ekle(
+                                sikayet_id=sikayet_id,
+                                kullanici_id=self.controller.aktif_kullanici.get('id'),
+                                kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
+                                islem_turu="OLUŞTURULDU",
+                                aciklama=f"Şikayet kaydı oluşturuldu"
+                            )
+                        except: pass
+                
+                # Toast Bildirimi
+                try:
+                    if self.controller:
+                        ToastNotification(self.controller, "Başarılı", mesaj)
+                except: pass
+            
+            # UI güncellemelerini main thread'de yap
+            self.after(0, self.callback_yenile)
+            self.after(100, self.geri_don)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # Hata mesajını main thread'de göster
+            self.after(0, lambda: self._show_error(str(e)))
+    
+    def _show_error(self, error_msg):
+        """Hata mesajını göster"""
+        self.lift()
+        self.focus_force()
+        messagebox.showerror("Kayıt Hatası", f"Şikayet kaydedilirken bir hata oluştu:\n{error_msg}", parent=self)
     
     def geri_don(self):
         """Şikayet arşivine geri dön"""
@@ -652,6 +798,7 @@ class AnaEkran(ctk.CTkFrame):
         self.center_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.center_frame.grid(row=1, column=0)
         
+        
         # Logo
         if os.path.exists("logo.png"):
             try:
@@ -664,17 +811,26 @@ class AnaEkran(ctk.CTkFrame):
                 ctk.CTkLabel(self.center_frame, text="", image=self.logo_image).pack(pady=20)
             except Exception as e:
                 print(f"Logo error: {e}")
+        
+        # Dashboard İstatistik Kartları
+        self.stats_frame = ctk.CTkFrame(self.center_frame, fg_color="transparent")
+        self.stats_frame.pack(pady=15)
+        
+        # İstatistikleri al ve kartları oluştur
+        self.create_dashboard_cards()
 
         ctk.CTkLabel(self.center_frame, text="ŞİKAYET TAKİP SİSTEMİ", font=ctk.CTkFont(size=30, weight="bold")).pack(pady=10)
         
         # Buttons
         btn_font = ctk.CTkFont(size=16, weight="bold")
         
-        ctk.CTkButton(self.center_frame, text="ŞİKAYET ARŞİVİ", command=lambda: controller.show_frame("SikayetArsivi"), width=300, height=50, font=btn_font).pack(pady=10)
-        ctk.CTkButton(self.center_frame, text="YENİ ŞİKAYET EKLE", command=controller.yeni_sikayet_ac, width=300, height=50, font=btn_font, fg_color="#2CC985", hover_color="#229C68").pack(pady=10)
-        ctk.CTkButton(self.center_frame, text="🗑️ ÇÖP KUTUSU", command=self.cop_kutusu_ac, width=300, height=50, font=btn_font, fg_color="#e74c3c", hover_color="#c0392b").pack(pady=10)
-        ctk.CTkButton(self.center_frame, text="AYARLAR", command=lambda: controller.show_frame("Ayarlar"), width=300, height=50, font=btn_font, fg_color="#1F6AA5", hover_color="#144870").pack(pady=10)
+        PremiumButton(self.center_frame, text="ŞİKAYET ARŞİVİ", command=lambda: controller.show_frame("SikayetArsivi"), width=300, height=50, font=btn_font).pack(pady=10)
+        PremiumButton(self.center_frame, text="YENİ ŞİKAYET EKLE", command=controller.yeni_sikayet_ac, width=300, height=50, font=btn_font, fg_color="#2CC985", hover_color="#229C68").pack(pady=10)
+        PremiumButton(self.center_frame, text="🗑️ ÇÖP KUTUSU", command=self.cop_kutusu_ac, width=300, height=50, font=btn_font, fg_color="#e74c3c", hover_color="#c0392b").pack(pady=10)
+        PremiumButton(self.center_frame, text="AYARLAR", command=lambda: controller.show_frame("Ayarlar"), width=300, height=50, font=btn_font, fg_color="#1F6AA5", hover_color="#144870").pack(pady=10)
     
+
+
     def cop_kutusu_ac(self):
         """Çöp kutusu penceresini aç"""
         CopKutusuPenceresi(self.controller, self.controller.db)
@@ -739,6 +895,101 @@ class AnaEkran(ctk.CTkFrame):
             
             self.user_name_label.configure(text=ad_soyad)
             self.user_role_label.configure(text=f"({rol_text})")
+    
+    def create_dashboard_cards(self):
+        """Dashboard istatistik kartlarını oluştur"""
+        try:
+            stats = self.controller.db.get_statistics()
+            
+            # Kartları yan yana yerleştir
+            self.create_stat_card("Toplam", stats['total'], "#3498db", 0)
+            self.create_stat_card("Açık", stats['open'], "#e67e22", 1)
+            self.create_stat_card("Kapalı", stats['closed'], "#27ae60", 2)
+            self.create_stat_card("Acil", stats['urgent'], "#e74c3c", 3)
+        except Exception as e:
+            print(f"Dashboard kartları hatası: {e}")
+    
+    def create_stat_card(self, title, value, color, column):
+        """Tek bir istatistik kartı oluştur - Modern tasarım"""
+        # Gradient renkler
+        gradient_colors = {
+            "#3498db": ("#3498db", "#2980b9"),  # Mavi
+            "#e67e22": ("#e67e22", "#d35400"),  # Turuncu
+            "#27ae60": ("#27ae60", "#229954"),  # Yeşil
+            "#e74c3c": ("#e74c3c", "#c0392b")   # Kırmızı
+        }
+        
+        # İkonlar
+        icons = {
+            "Toplam": "📊",
+            "Açık": "📂",
+            "Kapalı": "✅",
+            "Acil": "🚨"
+        }
+        
+        base_color, dark_color = gradient_colors.get(color, (color, color))
+        
+        # Ana kart frame - hover efekti için
+        card_container = ctk.CTkFrame(
+            self.stats_frame,
+            fg_color="transparent",
+            width=160,
+            height=110
+        )
+        card_container.grid(row=0, column=column, padx=10, pady=5)
+        card_container.grid_propagate(False)
+        
+        # İç kart (gradient efekti için)
+        card = ctk.CTkFrame(
+            card_container,
+            fg_color=base_color,
+            corner_radius=15,
+            border_width=0
+        )
+        card.pack(fill="both", expand=True, padx=2, pady=2)
+        
+        # Üst kısım - İkon
+        icon_label = ctk.CTkLabel(
+            card,
+            text=icons.get(title, "📌"),
+            font=ctk.CTkFont(size=28),
+            text_color="white"
+        )
+        icon_label.pack(pady=(12, 5))
+        
+        # Değer (büyük ve bold)
+        value_label = ctk.CTkLabel(
+            card,
+            text=str(value),
+            font=ctk.CTkFont(size=36, weight="bold"),
+            text_color="white"
+        )
+        value_label.pack(pady=0)
+        
+        # Başlık (küçük ve şık)
+        title_label = ctk.CTkLabel(
+            card,
+            text=title.upper(),
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="white"
+        )
+        title_label.pack(pady=(2, 12))
+        
+        # Hover efekti
+        def on_enter(e):
+            card.configure(fg_color=dark_color)
+        
+        def on_leave(e):
+            card.configure(fg_color=base_color)
+        
+        card.bind("<Enter>", on_enter)
+        card.bind("<Leave>", on_leave)
+        icon_label.bind("<Enter>", on_enter)
+        icon_label.bind("<Leave>", on_leave)
+        value_label.bind("<Enter>", on_enter)
+        value_label.bind("<Leave>", on_leave)
+        title_label.bind("<Enter>", on_enter)
+        title_label.bind("<Leave>", on_leave)
 
 
 class SikayetDetayPenceresi(ctk.CTkFrame):
@@ -796,82 +1047,68 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
         frame = ctk.CTkScrollableFrame(self.tab_bilgi, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=10, pady=10)
         
-        # Başlık
-        ctk.CTkLabel(frame, text=f"📋 {self.kayit[1]}", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=(0, 15))
+        # Tek bir metin alanı oluştur
+        text_area = ctk.CTkTextbox(frame, height=600, corner_radius=10, font=ctk.CTkFont(family="Consolas", size=13))
+        text_area.pack(fill="both", expand=True, padx=5, pady=5)
         
-        # Bilgi kartı
-        bilgi_frame = ctk.CTkFrame(frame, fg_color=("gray95", "gray25"), corner_radius=10)
-        bilgi_frame.pack(fill="x", pady=(0, 15))
+        # Bilgileri formatla
+        detay_metni = f"📋 ŞİKAYET DETAY RAPORU\n"
+        detay_metni += f"{'='*50}\n\n"
         
         bilgiler = [
-            ("Şikayet No:", self.kayit[1]),
-            ("Yolcu:", self.kayit[2]),
-            ("Telefon:", self.kayit[11] if len(self.kayit) > 11 else "-"),
-            ("E-posta:", self.kayit[12] if len(self.kayit) > 12 else "-"),
-            ("Seyahat Tarihi:", self.kayit[3]),
-            ("Güzergah:", self.kayit[4]),
-            ("PNR:", self.kayit[5]),
-            ("Plaka:", self.kayit[13] if len(self.kayit) > 13 else "-"),
-            ("Platform:", self.kayit[7]),
-            ("Kayıt Tarihi:", self.kayit[9]),
-            ("Şikayet Türü:", self.kayit[14] if len(self.kayit) > 14 else "-"),
-            ("Öncelik:", self.kayit[16] if len(self.kayit) > 16 else "-"),
-            ("Satın Alınan Yer:", self.kayit[17] if len(self.kayit) > 17 else "-"),
-            ("Başvurulan Yer:", self.kayit[18] if len(self.kayit) > 18 else "-"),
-            ("Bilet Ücreti:", (str(self.kayit[19]) + " TL") if len(self.kayit) > 19 and self.kayit[19] else "-"),
-            ("Durum:", self.kayit[10]),
+            ("Şikayet No", self.kayit[1]),
+            ("Durum", self.kayit[10]),
+            ("Öncelik", str(self.kayit[16] if len(self.kayit) > 16 else "-")),
+            ("Kayıt Tarihi", str(self.kayit[9])),
+            ("-", "-"),
+            ("Yolcu", self.kayit[2]),
+            ("Telefon", str(self.kayit[11] if len(self.kayit) > 11 else "-")),
+            ("E-posta", str(self.kayit[12] if len(self.kayit) > 12 else "-")),
+            ("-", "-"),
+            ("Seyahat Tarihi", str(self.kayit[3])),
+            ("Güzergah", self.kayit[4]),
+            ("PNR", self.kayit[5]),
+            ("Plaka", str(self.kayit[13] if len(self.kayit) > 13 else "-")),
+            ("Platform", self.kayit[7]),
+            ("-", "-"),
+            ("Şikayet Türü", str(self.kayit[14] if len(self.kayit) > 14 else "-")),
+            ("Satın Alınan", str(self.kayit[17] if len(self.kayit) > 17 else "-")),
+            ("Başvurulan", str(self.kayit[18] if len(self.kayit) > 18 else "-")),
+            ("Bilet Ücreti", (str(self.kayit[19]) + " TL") if len(self.kayit) > 19 and self.kayit[19] else "-"),
         ]
-
-        for baslik, deger in bilgiler:
-            satir = ctk.CTkFrame(bilgi_frame, fg_color="transparent")
-            satir.pack(fill="x", padx=15, pady=3)
-            ctk.CTkLabel(satir, text=baslik, font=ctk.CTkFont(weight="bold"), width=130, anchor="w").pack(side="left")
-            
-            # Kopyalanabilir Entry oluştur
-            deger_str = str(deger or "-")
-            
-            # Durum için renkli gösterim
-            if baslik == "Durum:":
-                durum = deger_str if deger_str != "-" else "Yeni"
-                if durum == "Çözüldü":
-                    renk = "#27ae60"
-                elif durum == "İşlemde":
-                    renk = "#f39c12"
-                else:
-                    renk = "#e74c3c"
-                entry = ctk.CTkEntry(satir, fg_color="transparent", border_width=0, text_color=renk, font=ctk.CTkFont(weight="bold"))
-                entry.insert(0, durum)
-                entry.configure(state="readonly")
-                entry.pack(side="left", fill="x", expand=True)
-            # Öncelik için renkli gösterim
-            elif baslik == "Öncelik:":
-                oncelik = deger_str
-                if oncelik == "Acil":
-                    renk = "#e74c3c"
-                elif oncelik == "Yüksek":
-                    renk = "#e67e22"
-                elif oncelik == "Orta":
-                    renk = "#f39c12"
-                else:
-                    renk = "#27ae60"
-                entry = ctk.CTkEntry(satir, fg_color="transparent", border_width=0, text_color=renk, font=ctk.CTkFont(weight="bold"))
-                entry.insert(0, oncelik)
-                entry.configure(state="readonly")
-                entry.pack(side="left", fill="x", expand=True)
-            else:
-                entry = ctk.CTkEntry(satir, fg_color="transparent", border_width=0)
-                entry.insert(0, deger_str)
-                entry.configure(state="readonly")
-                entry.pack(side="left", fill="x", expand=True)
-
-        # Şikayet Açıklaması
-        ctk.CTkLabel(frame, text="Şikayet Açıklaması:", font=ctk.CTkFont(weight="bold", size=14)).pack(pady=(15, 5), anchor="w")
         
-        text_area = ctk.CTkTextbox(frame, height=150, corner_radius=10)
-        text_area.insert("1.0", self.kayit[8] or "")
-        text_area.pack(fill="x", pady=(0, 10))
-        # Metin seçilebilir ve kopyalanabilir olacak, ancak düzenlenemeyecek
-        text_area.bind("<Key>", lambda e: "break" if e.keysym not in ["c", "C", "a", "A"] or not (e.state & 0x4) else None)
+        for baslik, deger in bilgiler:
+            if baslik == "-":
+                detay_metni += f"{'-'*30}\n"
+            else:
+                # Hizalama için ljust kullan
+                detay_metni += f"{baslik.ljust(20)}: {deger or '-'}\n"
+        
+        detay_metni += f"\n📝 ŞİKAYET AÇIKLAMASI\n"
+        detay_metni += f"{'='*50}\n"
+        detay_metni += str(self.kayit[8] or "")
+        
+        
+        text_area.insert("1.0", detay_metni)
+        
+        # Metni düzenlenemez yap AMA seçilebilir/kopyalanabilir
+        # CTkTextbox'ta state="disabled" kullanırsak metin seçilemez
+        # Bu yüzden sadece klavye girişini engelleyelim
+        text_area.configure(state="normal")  # Normal durumda bırak ki seçilebilsin
+        
+        # Fare ile seçim ve Ctrl+C çalışacak
+        # Sadece yazma işlemini engelleyelim
+        def on_key(event):
+            # Ctrl+C, Ctrl+A ve navigasyon tuşlarına izin ver
+            if event.state & 4:  # Ctrl basılı
+                if event.keysym.lower() in ['c', 'a', 'x']:  # Kopyala, Tümünü Seç, Kes
+                    return  # İzin ver
+            if event.keysym in ['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Prior', 'Next']:
+                return  # Navigasyon tuşlarına izin ver
+            # Diğer tüm tuşları engelle (yazma engellendi)
+            return "break"
+        
+        text_area.bind("<Key>", on_key)
     
     def geri_don(self):
         """Şikayet arşivine geri dön"""
@@ -1221,11 +1458,60 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
                     
                     y -= 32
                 
-                # Daha fazla işlem varsa not ekle
                 if len(tum_islemler) > 5:
                     c.setFillColor(HexColor("#6c757d"))
                     c.setFont(font_name, 8)
                     c.drawString(30, y - 5, f"... ve {len(tum_islemler) - 5} işlem daha")
+                    y -= 20
+
+            # ===== NOTLAR =====
+            # Şikayete ait notları getir
+            notlar = self.db.notlari_getir(self.kayit_id)
+            
+            if notlar and len(notlar) > 0:
+                c.setFillColor(HexColor("#e67e22"))  # Turuncu renk
+                c.rect(20, y - 5, width - 40, 22, fill=True, stroke=False)
+                c.setFillColor(white)
+                c.setFont(bold_font, 11)
+                c.drawString(30, y + 3, f"NOTLAR ({len(notlar)} kayıt)")
+                y -= 30
+                
+                # Not listesi
+                for i, not_kayit in enumerate(notlar[:5]):  # Max 5 not göster
+                    # id, kullanici, metin, tarih
+                    not_kullanici = not_kayit[1] or "Sistem"
+                    not_metni = not_kayit[2]
+                    not_tarih = not_kayit[3]
+                    
+                    # Alternatif arka plan rengi
+                    if i % 2 == 0:
+                        c.setFillColor(light_gray)
+                    else:
+                        c.setFillColor(white)
+                    c.roundRect(20, y - 28, width - 40, 30, 3, fill=True, stroke=False)
+                    
+                    c.setFillColor(text_color)
+                    
+                    c.setFont(bold_font, 8)
+                    c.drawString(25, y - 8, f"• {not_kullanici}")
+                    
+                    c.setFont(font_name, 7)
+                    c.setFillColor(HexColor("#6c757d"))
+                    c.drawString(25, y - 18, f"  {not_tarih}")
+                    
+                    # Açıklama (kısaltılmış)
+                    c.setFillColor(text_color)
+                    c.setFont(font_name, 7)
+                    not_kisalt = not_metni[:60] + "..." if len(not_metni) > 60 else not_metni
+                    c.drawString(150, y - 13, not_kisalt)
+                    
+                    y -= 32
+                
+                # Daha fazla not varsa ekle
+                if len(notlar) > 5:
+                    c.setFillColor(HexColor("#6c757d"))
+                    c.setFont(font_name, 8)
+                    c.drawString(30, y - 5, f"... ve {len(notlar) - 5} not daha")
                     y -= 20
             
             # ===== FOOTER =====
@@ -1330,6 +1616,8 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
         if onay:
             self.db.sikayet_islemini_sil(islem_id)
             self.islemleri_listele()
+            self.gecmis_guncelle()
+
     
     # ============== DOSYALAR SEKMESİ ==============
     def dosyalar_sekmesi_olustur(self):
@@ -1575,8 +1863,8 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
             if os.path.exists(dosya_yolu):
                 try:
                     os.remove(dosya_yolu)
-                except:
-                    pass
+                except Exception as e:
+                    messagebox.showwarning("Uyarı", f"Dosya veritabanından silindi ancak fiziksel dosya silinemedi:\n{e}", parent=self)
             
             self.dosyalari_listele()
     
@@ -1632,7 +1920,6 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
         # Notu kaydet
         self.db.not_ekle(
             sikayet_id=self.kayit_id,
-            kullanici_id=kullanici_id,
             kullanici_adi=kullanici_adi,
             not_metni=not_metni
         )
@@ -1704,6 +1991,8 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
         if onay:
             self.db.not_sil(not_id)
             self.notlari_listele()
+            self.gecmis_guncelle()
+
     
     # ============== ETİKETLER SEKMESİ ==============
     def etiketler_sekmesi_olustur(self):
@@ -2021,10 +2310,13 @@ class SikayetDetayPenceresi(ctk.CTkFrame):
             messagebox.showwarning("Uyarı", "Lütfen hatırlatma mesajı girin.", parent=self)
             return
         
-        # Tarih formatını kontrol et
+        # Tarih formatını kontrol et - Daha esnek
         try:
             from datetime import datetime
-            tarih_saat = datetime.strptime(f"{tarih_str} {saat_str}", "%d.%m.%Y %H:%M")
+            t_str = tarih_str.replace("/", ".").replace("-", ".")
+            s_str = saat_str.replace(".", ":")
+            
+            tarih_saat = datetime.strptime(f"{t_str} {s_str}", "%d.%m.%Y %H:%M")
             hatirlatma_tarihi = tarih_saat.strftime("%Y-%m-%d %H:%M:00")
         except ValueError:
             self.lift()
@@ -2164,6 +2456,8 @@ class SikayetArsivi(ctk.CTkFrame):
         self.db = controller.db
         self.tum_kayitlar = []
         
+
+        
         # Sayfalama ayarları
         self.sayfa_basi_kayit = 12  # Her sayfada 12 kart (4 satır x 3 sütun)
         self.mevcut_sayfa = 1
@@ -2196,9 +2490,76 @@ class SikayetArsivi(ctk.CTkFrame):
                       font=ctk.CTkFont(size=14, weight="bold"),
                       fg_color="#10b981", hover_color="#059669").pack(side="right", padx=20, pady=11)
         
+        # --- TOPLU İŞLEMLER PANELİ ---
+        self.bulk_panel = ctk.CTkFrame(self, height=50, corner_radius=0, fg_color=("gray95", "gray25"))
+        self.bulk_panel.grid(row=1, column=0, sticky="ew", padx=15, pady=(8, 0))
+        
+        # Seçili sayısı
+        self.selected_label = ctk.CTkLabel(
+            self.bulk_panel,
+            text="0 seçili",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=("gray60", "gray50")
+        )
+        self.selected_label.pack(side="left", padx=15)
+        
+        # Toplu işlem butonları
+        ctk.CTkButton(
+            self.bulk_panel,
+            text="☑ Tümünü Seç",
+            command=self.select_all,
+            width=110,
+            height=32,
+            corner_radius=8,
+            fg_color=("#3498db", "#2980b9"),
+            hover_color=("#2980b9", "#1a5276"),
+            font=ctk.CTkFont(size=12)
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            self.bulk_panel,
+            text="🔄 Durum Değiştir",
+            command=self.bulk_change_status,
+            width=130,
+            height=32,
+            corner_radius=8,
+            fg_color=("#e67e22", "#d35400"),
+            hover_color=("#d35400", "#a04000"),
+            font=ctk.CTkFont(size=12)
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            self.bulk_panel,
+            text="📄 PDF Çıktısı",
+            command=self.bulk_pdf,
+            width=110,
+            height=32,
+            corner_radius=8,
+            fg_color=("#27ae60", "#229954"),
+            hover_color=("#229954", "#1e8449"),
+            font=ctk.CTkFont(size=12)
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            self.bulk_panel,
+            text="🗑️ Sil",
+            command=self.bulk_delete,
+            width=80,
+            height=32,
+            corner_radius=8,
+            fg_color=("#e74c3c", "#c0392b"),
+            hover_color=("#c0392b", "#a93226"),
+            font=ctk.CTkFont(size=12)
+        ).pack(side="left", padx=5)
+        
+        # Seçili kayıtları takip et
+        self.selected_items = set()
+                      
+
+        
         # --- ARAMA VE FİLTRE PANELİ (Tek satır) ---
         self.arama_panel = ctk.CTkFrame(self, height=55, corner_radius=12, fg_color=("gray95", "gray25"))
-        self.arama_panel.grid(row=1, column=0, sticky="ew", padx=15, pady=(12, 8))
+        self.arama_panel.grid(row=2, column=0, sticky="ew", padx=15, pady=(12, 8))
         
         # Arama kutusu (daha geniş ve modern)
         self.entry_arama = ctk.CTkEntry(self.arama_panel, 
@@ -2206,6 +2567,7 @@ class SikayetArsivi(ctk.CTkFrame):
                                          width=350, height=38, corner_radius=10,
                                          font=ctk.CTkFont(size=13))
         self.entry_arama.pack(side="left", padx=12, pady=8)
+        self.filtre_job = None
         self.entry_arama.bind("<KeyRelease>", lambda e: self.filtrele())
         
         # Temizle butonu (minimal)
@@ -2222,7 +2584,7 @@ class SikayetArsivi(ctk.CTkFrame):
         
         # --- MODERN FİLTRE CHIPS (Tek satırda) ---
         self.filtre_panel = ctk.CTkFrame(self, height=50, corner_radius=0, fg_color="transparent")
-        self.filtre_panel.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 5))
+        self.filtre_panel.grid(row=3, column=0, sticky="ew", padx=15, pady=(0, 5))
         
         # Tüm filtreler tek satırda - yatay kaydırılabilir
         filtre_scroll = ctk.CTkScrollableFrame(self.filtre_panel, height=48, orientation="horizontal", 
@@ -2386,88 +2748,264 @@ class SikayetArsivi(ctk.CTkFrame):
         
         self.listeyi_yenile()
     
-    def kart_olustur(self, kayit, row, col):
-        """Tek bir şikayet kartı oluştur"""
-        # kayit: (id, sikayet_no, yolcu_adi, seyahat_tarihi, guzergah, pnr, iletisim, platform, sikayet_detay, kayit_tarihi, durum, telefon, eposta, plaka, sikayet_turu, lokasyon, oncelik, satin_alinan_yer)
+    
+    # === TOPLU İŞLEMLER ===
+    def toggle_selection(self, kayit_id, is_selected):
+        """Checkbox ile seçimi yönet"""
+        if is_selected:
+            self.selected_items.add(kayit_id)
+        else:
+            self.selected_items.discard(kayit_id)
+        self.update_selected_count()
+    
+    def select_all(self):
+        """Tüm kayıtları seç/kaldır"""
+        if len(self.selected_items) == len(self.tum_kayitlar):
+            # Tümünü kaldır
+            self.selected_items.clear()
+        else:
+            # Tümünü seç (ID bazlı)
+            self.selected_items = set(kayit[0] for kayit in self.tum_kayitlar)
+        self.update_selected_count()
+        # Kartları yenile (checkbox'ları güncelle)
+        if hasattr(self, 'kartlari_goster'):
+            self.kartlari_goster()
+    
+    def bulk_change_status(self):
+        """Seçili kayıtların durumunu değiştir"""
+        if not self.selected_items:
+            messagebox.showwarning("Uyarı", "Lütfen en az bir kayıt seçin")
+            return
         
+        dialog = ctk.CTkInputDialog(text="Yeni durum:\n(Yeni/İşlemde/Çözüldü/Kapalı)", title="Durum Değiştir")
+        new_status = dialog.get_input()
+        
+        if new_status:
+            for kayit_id in self.selected_items:
+                self.db.durumu_guncelle(kayit_id, new_status)
+            
+            messagebox.showinfo("Başarılı", f"{len(self.selected_items)} kayıt güncellendi")
+            self.selected_items.clear()
+            self.update_selected_count()
+            # Listeyi yenile
+            if hasattr(self, 'listeyi_yenile'):
+                self.listeyi_yenile()
+    
+    def bulk_pdf(self):
+        """Seçili kayıtlar için PDF oluştur"""
+        if not self.selected_items:
+            messagebox.showwarning("Uyarı", "Lütfen en az bir kayıt seçin")
+            return
+        messagebox.showinfo("Bilgi", f"{len(self.selected_items)} kayıt için PDF oluşturuluyor...")
+    
+    def bulk_delete(self):
+        """Seçili kayıtları sil"""
+        if not self.selected_items:
+            messagebox.showwarning("Uyarı", "Lütfen en az bir kayıt seçin")
+            return
+        
+        onay = messagebox.askyesno("Onay", f"{len(self.selected_items)} kayıt silinecek. Emin misiniz?")
+        if onay:
+            for kayit_id in self.selected_items:
+                self.db.sikayet_sil(kayit_id)
+            
+            messagebox.showinfo("Başarılı", f"{len(self.selected_items)} kayıt silindi")
+            self.selected_items.clear()
+            self.update_selected_count()
+            # Listeyi yenile
+            if hasattr(self, 'listeyi_yenile'):
+                self.listeyi_yenile()
+    
+    def update_selected_count(self):
+        """Seçili sayısını güncelle"""
+        count = len(self.selected_items)
+        self.selected_label.configure(text=f"{count} seçili")
+    
+    def ayarlari_ac(self):
+        """Ayarlar ve API Key Giriş Penceresi"""
+        try:
+           if hasattr(self, 'ayarlar_penceresi') and self.ayarlar_penceresi is not None and self.ayarlar_penceresi.winfo_exists():
+               self.ayarlar_penceresi.lift()
+               return
+        except: pass
+
+        self.ayarlar_penceresi = ctk.CTkToplevel(self)
+        self.ayarlar_penceresi.title("⚙️ Uygulama Ayarları")
+        self.ayarlar_penceresi.geometry("450x350")
+        self.ayarlar_penceresi.resizable(False, False)
+        
+        # Ortala
+        self.ayarlar_penceresi.update_idletasks()
+        x = (self.winfo_screenwidth() - 450) // 2
+        y = (self.winfo_screenheight() - 350) // 2
+        self.ayarlar_penceresi.geometry(f"+{x}+{y}")
+        self.ayarlar_penceresi.attributes("-topmost", True)
+        
+        ctk.CTkLabel(self.ayarlar_penceresi, text="🤖 Yapay Zeka Ayarları", 
+                     font=ctk.CTkFont(size=18, weight="bold")).pack(pady=20)
+        
+        info_text = (
+            "Google Gemini API (Ücretsiz) kullanarak şikayetleri\n"
+            "çok daha detaylı analiz edebilirsiniz.\n\n"
+            "1. aistudio.google.com adresinden API Key alın.\n"
+            "2. Aşağıdaki kutuya yapıştırın."
+        )
+        ctk.CTkLabel(self.ayarlar_penceresi, text=info_text, justify="left").pack(pady=10, padx=20)
+        
+        ctk.CTkLabel(self.ayarlar_penceresi, text="API Anahtarı:", anchor="w").pack(fill="x", padx=30, pady=(10, 0))
+        entry_key = ctk.CTkEntry(self.ayarlar_penceresi, textvariable=self.api_key_var, width=300, show="*")
+        entry_key.pack(fill="x", padx=30, pady=(5, 20))
+        
+        def kaydet():
+            key = self.api_key_var.get().strip()
+            import json
+            try:
+                with open("config.json", "w") as f:
+                    json.dump({"gemini_api_key": key}, f)
+                from tkinter import messagebox
+                messagebox.showinfo("Başarılı", "API Anahtarı kaydedildi!\nArtık analizlerde Gemini AI kullanılacak.", parent=self.ayarlar_penceresi)
+                self.ayarlar_penceresi.destroy()
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror("Hata", f"Kaydedilemedi: {e}", parent=self.ayarlar_penceresi)
+        
+        ctk.CTkButton(self.ayarlar_penceresi, text="💾 Kaydet ve Kapat", command=kaydet, 
+                      width=200, height=40, font=ctk.CTkFont(weight="bold"), 
+                      fg_color="#10b981", hover_color="#059669").pack(pady=10)
+
+    def kart_olustur(self, kayit, row, col):
+        """Tek bir şikayet kartı oluştur (Premium Tasarım)"""
+        
+        # Veri Ayrıştırma
         kayit_id = kayit[0]
-        sikayet_no = kayit[1] or ""
-        yolcu = kayit[2] or "-"
-        pnr = kayit[5] or "-"
+        sikayet_no = kayit[1] or "---"
+        yolcu = kayit[2] or "İsimsiz Yolcu"
+        tarih = kayit[9] if len(kayit) > 9 and kayit[9] else "" # Kayıt tarihi
+        # Tarihi kısalt (Sadece gün.ay.yil)
+        if tarih and " " in str(tarih): tarih = str(tarih).split()[0]
+            
         durum = kayit[10] or "Yeni"
         telefon = kayit[11] if len(kayit) > 11 and kayit[11] else "-"
-        sikayet_turu = kayit[14] if len(kayit) > 14 and kayit[14] else "-"
-        oncelik = kayit[16] if len(kayit) > 16 and kayit[16] else "Orta"
+        sikayet_turu = kayit[14] if len(kayit) > 14 and kayit[14] else "Diğer"
+        oncelik = kayit[16] if len(kayit) > 16 and kayit[16] else "Normal"
+        pnr = kayit[5] or "-"
         
-        # Durum renkleri
-        durum_renk = {"Yeni": "#e74c3c", "İşlemde": "#f39c12", "Çözüldü": "#27ae60"}
-        oncelik_renk = {"Acil": "#e74c3c", "Yüksek": "#e67e22", "Orta": "#f39c12", "Düşük": "#27ae60"}
+        # Renk Paleti (Tailwind Colors)
+        renkler = {
+            "Yeni": "#ef4444",      # Red-500
+            "İşlemde": "#f59e0b",   # Amber-500
+            "Çözüldü": "#22c55e",   # Green-500
+            "İptal": "#94a3b8"      # Slate-400
+        }
+        accent_color = renkler.get(durum, "#94a3b8")
         
-        # Kart frame
-        kart = ctk.CTkFrame(self.kart_panel, corner_radius=12, fg_color=("gray95", "gray25"), border_width=1, border_color=("gray80", "gray40"))
-        kart.grid(row=row, column=col, padx=8, pady=8, sticky="nsew")
+        # Kart Çerçevesi
+        kart = ctk.CTkFrame(self.kart_panel, corner_radius=15, 
+                            fg_color=("white", "#2d2d2d"), 
+                            border_width=1, border_color=("gray90", "#404040"))
+        kart.grid(row=row, column=col, padx=10, pady=10, sticky="nsew")
         kart.configure(cursor="hand2")
         
-        # Üst kısım: Şikayet türü ve durum
-        ust = ctk.CTkFrame(kart, fg_color="transparent")
-        ust.pack(fill="x", padx=12, pady=(10, 5))
+        # Sol Şerit (Durum Göstergesi)
+        serit = ctk.CTkFrame(kart, width=6, corner_radius=15, fg_color=accent_color)
+        serit.pack(side="left", fill="y", padx=0, pady=0)
         
-        # Şikayet türü etiketi
-        tur_label = ctk.CTkLabel(ust, text=sikayet_turu, font=ctk.CTkFont(size=11), 
-                                  fg_color=("#3498db", "#2980b9"), corner_radius=5, 
-                                  text_color="white", padx=8, pady=2)
-        tur_label.pack(side="left")
+        # İçerik Konteyneri
+        content = ctk.CTkFrame(kart, fg_color="transparent")
+        content.pack(side="left", fill="both", expand=True, padx=12, pady=10)
         
-        # Durum etiketi
-        durum_label = ctk.CTkLabel(ust, text=durum, font=ctk.CTkFont(size=11, weight="bold"),
-                                    fg_color=durum_renk.get(durum, "#95a5a6"), corner_radius=5,
-                                    text_color="white", padx=8, pady=2)
-        durum_label.pack(side="right")
+        # --- ÜST BİLGİ (Ref No - Tarih - Checkbox) ---
+        header = ctk.CTkFrame(content, fg_color="transparent", height=20)
+        header.pack(fill="x", pady=(0, 2))
         
-        # Öncelik göstergesi (küçük nokta)
-        oncelik_frame = ctk.CTkFrame(ust, width=12, height=12, corner_radius=6, 
-                                      fg_color=oncelik_renk.get(oncelik, "#f39c12"))
-        oncelik_frame.pack(side="right", padx=(0, 8))
+        ctk.CTkLabel(header, text=f"#{sikayet_no}", font=ctk.CTkFont(size=11), text_color=("gray50", "gray50")).pack(side="left")
         
-        # Orta kısım: İsim Soyisim (büyük)
-        ctk.CTkLabel(kart, text=yolcu, font=ctk.CTkFont(size=15, weight="bold"), anchor="w").pack(fill="x", padx=12, pady=(5, 2))
+        # Checkbox (Sağ Üst) - Toplu işlemler için
+        is_selected = kayit_id in self.selected_items
+        checkbox_var = tk.BooleanVar(value=is_selected)
+        checkbox = ctk.CTkCheckBox(
+            header,
+            text="",
+            variable=checkbox_var,
+            width=20,
+            checkbox_width=18,
+            checkbox_height=18,
+            corner_radius=4,
+            border_width=2,
+            fg_color="#3498db",
+            hover_color="#2980b9",
+            command=lambda: self.toggle_selection(kayit_id, checkbox_var.get())
+        )
+        checkbox.pack(side="right", padx=(5, 0))
         
-        # Alt bilgiler: Telefon ve PNR
-        alt = ctk.CTkFrame(kart, fg_color="transparent")
-        alt.pack(fill="x", padx=12, pady=(2, 10))
+        # Öncelik Badge veya Tarih
+        oncelik_renk = {"Yüksek": "#fee2e2", "Acil": "#fee2e2", "Normal": "#f1f5f9", "Düşük": "#f0fdf4"}
+        oncelik_text_renk = {"Yüksek": "#dc2626", "Acil": "#b91c1c", "Normal": "#475569", "Düşük": "#166534"}
         
-        ctk.CTkLabel(alt, text=f"📞 {telefon}", font=ctk.CTkFont(size=12), text_color=("gray50", "gray60"), anchor="w").pack(side="left")
-        ctk.CTkLabel(alt, text=f"🎫 {pnr}", font=ctk.CTkFont(size=12), text_color=("gray50", "gray60"), anchor="e").pack(side="right")
+        if oncelik != "Normal": 
+            badge = ctk.CTkLabel(header, text=oncelik, font=ctk.CTkFont(size=10, weight="bold"),
+                                 fg_color=oncelik_renk.get(oncelik, "#f1f5f9"),
+                                 text_color=oncelik_text_renk.get(oncelik, "#475569"),
+                                 corner_radius=6, height=18)
+            badge.pack(side="right", padx=(0, 5))
+        else:
+            ctk.CTkLabel(header, text=tarih, font=ctk.CTkFont(size=11), text_color="gray").pack(side="right", padx=(0, 5))
+            
+        # --- ANA BİLGİ (Yolcu İsmi) ---
+        ctk.CTkLabel(content, text=yolcu, font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"), anchor="w").pack(fill="x", pady=(2, 4))
         
-        # Tıklama olayları - tüm karta ve alt elemanlarına bağla
-        def on_click(e):
+        # --- TÜR ETİKETİ ---
+        tur_bg = ("#e0f2fe", "#0c4a6e") 
+        tur_fg = ("#0369a1", "#38bdf8")
+        
+        ctk.CTkLabel(content, text=sikayet_turu, font=ctk.CTkFont(size=11, weight="bold"),
+                     fg_color=tur_bg, text_color=tur_fg, corner_radius=6, anchor="w", padx=8).pack(fill="x", pady=(0, 8))
+        
+        # --- ALT BİLGİLER (İkonlu) ---
+        footer = ctk.CTkFrame(content, fg_color="transparent")
+        footer.pack(fill="x", pady=(5, 0))
+        
+        # Telefon satırı
+        row1 = ctk.CTkFrame(footer, fg_color="transparent")
+        row1.pack(fill="x")
+        ctk.CTkLabel(row1, text="📞", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 5))
+        ctk.CTkLabel(row1, text=telefon, font=ctk.CTkFont(size=12), text_color="gray").pack(side="left")
+        
+        # PNR satırı
+        if pnr and pnr != "-":
+            row2 = ctk.CTkFrame(footer, fg_color="transparent")
+            row2.pack(fill="x", pady=(2, 0))
+            ctk.CTkLabel(row2, text="🎫", font=ctk.CTkFont(size=12)).pack(side="left", padx=(0, 5))
+            ctk.CTkLabel(row2, text=pnr, font=ctk.CTkFont(size=12, weight="bold"), text_color=("gray40", "gray60")).pack(side="left")
+
+        # --- TIKLAMA OLAYLARI ---
+        def on_click(e): 
+            # Checkbox'a tıklanmışsa detay açma
+            if isinstance(e.widget, ctk.CTkCheckBox):
+                return
             self.kart_tiklandi(kayit)
         
-        def on_double_click(e):
-            self.kart_cift_tiklandi(kayit)
+        def on_double(e): self.kart_cift_tiklandi(kayit)
         
-        # Kartı ve tüm alt elemanlarını tıklanabilir yap
-        for widget in [kart, ust, alt, tur_label, durum_label]:
-            widget.bind("<Button-1>", on_click)
-            widget.bind("<Double-Button-1>", on_double_click)
+        def bind_recursive(w):
+            try:
+                # Checkbox değilse bind et
+                if not isinstance(w, ctk.CTkCheckBox):
+                    w.bind("<Button-1>", on_click)
+                    w.bind("<Double-Button-1>", on_double)
+            except: pass
+            for child in w.winfo_children():
+                bind_recursive(child)
         
-        # Kart içindeki label'ları da tıklanabilir yap
-        for child in kart.winfo_children():
-            child.bind("<Button-1>", on_click)
-            child.bind("<Double-Button-1>", on_double_click)
-            if hasattr(child, 'winfo_children'):
-                for subchild in child.winfo_children():
-                    subchild.bind("<Button-1>", on_click)
-                    subchild.bind("<Double-Button-1>", on_double_click)
+        bind_recursive(kart)
     
     def kart_tiklandi(self, kayit):
-        """Karta tek tıklandığında - seçim için (isteğe bağlı)"""
-        pass  # İsterseniz seçim efekti ekleyebiliriz
+        """Karta tek tıklandığında - detay sayfasını aç"""
+        self.controller.sikayet_detay_ac(kayit)
     
     def kart_cift_tiklandi(self, kayit):
-        """Karta çift tıklandığında - detay/düzenleme menüsü aç"""
-        self.secili_kayit = kayit
-        self.islem_menusu_goster(kayit)
+        """Karta çift tıklandığında - detay sayfasını aç"""
+        self.controller.sikayet_detay_ac(kayit)
     
     def islem_menusu_goster(self, kayit):
         """Sağ tık benzeri işlem menüsü"""
@@ -2601,8 +3139,14 @@ class SikayetArsivi(ctk.CTkFrame):
         else:
             # İşlemleri listele
             for islem in islemler:
-                # islem: (id, tarih, kullanici_adi, islem_turu, aciklama, eski_durum, yeni_durum)
-                islem_id, tarih, kullanici, islem_turu, aciklama, eski_durum, yeni_durum = islem
+                # Veritabanı yapısı: (id[0], sikayet_id[1], tarih[2], kullanici_id[3], kullanici_adi[4], islem_turu[5], aciklama[6], eski[7], yeni[8])
+                islem_id = islem[0]
+                tarih = islem[2]
+                kullanici = islem[4]
+                islem_turu = islem[5]
+                aciklama = islem[6]
+                eski_durum = islem[7]
+                yeni_durum = islem[8]
                 
                 # İşlem kartı
                 kart = ctk.CTkFrame(liste_frame, fg_color=("white", "gray25"), corner_radius=8, 
@@ -2729,60 +3273,111 @@ class SikayetArsivi(ctk.CTkFrame):
             self.listeyi_yenile()
     
     def listeyi_yenile(self):
-        """Kartları yenile (sayfalama ile)"""
-        # Verileri al
-        self.tum_kayitlar = self.db.sikayetleri_getir()
-        self.filtreli_kayitlar = self.tum_kayitlar.copy()
-        self.mevcut_sayfa = 1
-        self._sayfalama_guncelle()
-    
-    def _sayfalama_guncelle(self):
-        """Sayfalama bilgilerini güncelle ve kartları göster"""
-        # Mevcut kartları temizle
+        """
+        PERFORMANS OPTİMİZASYONU: Veritabanı seviyesinde sayfalama
+        Sadece mevcut sayfadaki kayıtları getir (tümünü değil!)
+        """
+        # Kart panelini temizle
+        for widget in self.kart_panel.winfo_children():
+            widget.destroy()
+            
+        # Skeleton Loading Göster (sayfa başı kayıt kadar)
+        for i in range(min(self.sayfa_basi_kayit, 12)):
+            row = i // 3
+            col = i % 3
+            skel = SkeletonCard(self.kart_panel)
+            skel.grid(row=row, column=col, padx=10, pady=10, sticky="ew")
+            
+        # Arka planda veriyi çek
+        def veri_cek_thread():
+            try:
+                import time
+                time.sleep(0.05)  # Skeleton kısa süre görünsün
+                
+                # Filtre objesi oluştur
+                filtre = {}
+                
+                # Durum filtresi
+                if self.aktif_durum_filtre and self.aktif_durum_filtre != 'Tümü':
+                    filtre['durum'] = self.aktif_durum_filtre
+                
+                # Öncelik filtresi
+                if self.aktif_oncelik_filtre and self.aktif_oncelik_filtre != 'Tümü':
+                    filtre['oncelik'] = self.aktif_oncelik_filtre
+                
+                # Tür filtresi
+                if self.aktif_tur_filtre and self.aktif_tur_filtre != 'Tümü':
+                    # Kısa isimden gerçek isme çevir
+                    gercek_tur = self.tur_eslestirme.get(self.aktif_tur_filtre, self.aktif_tur_filtre)
+                    filtre['tur'] = gercek_tur
+                
+                # Arama filtresi
+                arama_text = self.entry_arama.get().strip()
+                if arama_text:
+                    filtre['arama'] = arama_text
+                
+                # Toplam kayıt sayısını al (sayfalama için)
+                toplam_kayit = self.db.sikayetleri_say(filtre)
+                
+                # Sayfa hesaplamaları
+                toplam_sayfa = max(1, (toplam_kayit + self.sayfa_basi_kayit - 1) // self.sayfa_basi_kayit)
+                mevcut_sayfa = min(self.mevcut_sayfa, toplam_sayfa)
+                
+                # SADECE mevcut sayfayı getir (VERİTABANI SEVİYESİNDE SAYFALAMA!)
+                offset = (mevcut_sayfa - 1) * self.sayfa_basi_kayit
+                kayitlar = self.db.sikayetleri_getir(
+                    limit=self.sayfa_basi_kayit,
+                    offset=offset,
+                    filtre=filtre
+                )
+                
+                # Ana thread'de UI güncelle
+                self.after(0, lambda: self._veri_yuklendi_optimized(kayitlar, toplam_kayit, toplam_sayfa, mevcut_sayfa))
+            except Exception as e:
+                print(f"❌ Veri çekme hatası: {e}")
+                import traceback
+                traceback.print_exc()
+                
+        threading.Thread(target=veri_cek_thread, daemon=True).start()
+
+    def _veri_yuklendi_optimized(self, kayitlar, toplam_kayit, toplam_sayfa, mevcut_sayfa):
+        """Veriler arka plandan gelince çalışır (OPTIMIZE EDİLMİŞ)"""
+        # Kart panelini temizle
         for widget in self.kart_panel.winfo_children():
             widget.destroy()
         
-        toplam_kayit = len(self.filtreli_kayitlar)
-        self.toplam_sayfa = max(1, (toplam_kayit + self.sayfa_basi_kayit - 1) // self.sayfa_basi_kayit)
-        
-        # Sayfa sınırlarını kontrol et
-        if self.mevcut_sayfa > self.toplam_sayfa:
-            self.mevcut_sayfa = self.toplam_sayfa
-        if self.mevcut_sayfa < 1:
-            self.mevcut_sayfa = 1
-        
-        # Bu sayfadaki kayıtları hesapla
-        baslangic = (self.mevcut_sayfa - 1) * self.sayfa_basi_kayit
-        bitis = baslangic + self.sayfa_basi_kayit
-        sayfa_kayitlari = self.filtreli_kayitlar[baslangic:bitis]
+        # Sayfa bilgilerini güncelle
+        self.mevcut_sayfa = mevcut_sayfa
+        self.toplam_sayfa = toplam_sayfa
         
         # Kartları oluştur
-        for i, kayit in enumerate(sayfa_kayitlari):
+        for i, kayit in enumerate(kayitlar):
             row = i // 3
             col = i % 3
             self.kart_olustur(kayit, row, col)
         
-        # Sayfalama bilgilerini güncelle
-        self.kayit_bilgi_label.configure(text=f"Toplam: {toplam_kayit} kayıt")
-        self.sayfa_label.configure(text=f"Sayfa {self.mevcut_sayfa} / {self.toplam_sayfa}")
+        # UI bilgilerini güncelle
+        self.kayit_bilgi_label.configure(text=f"📊 {toplam_kayit} kayıt")
+        self.sayfa_label.configure(text=f"{self.mevcut_sayfa} / {self.toplam_sayfa}")
         
         # Buton durumlarını güncelle
         self.btn_ilk.configure(state="normal" if self.mevcut_sayfa > 1 else "disabled")
         self.btn_onceki.configure(state="normal" if self.mevcut_sayfa > 1 else "disabled")
         self.btn_sonraki.configure(state="normal" if self.mevcut_sayfa < self.toplam_sayfa else "disabled")
         self.btn_son.configure(state="normal" if self.mevcut_sayfa < self.toplam_sayfa else "disabled")
+
     
     def sayfaya_git(self, sayfa):
         """Belirtilen sayfaya git"""
-        if 1 <= sayfa <= self.toplam_sayfa:
+        if sayfa >= 1:  # Üst limit kontrolü listeyi_yenile'de yapılıyor
             self.mevcut_sayfa = sayfa
-            self._sayfalama_guncelle()
+            self.listeyi_yenile()  # Yeni sayfayı yükle
     
     def sayfa_basi_degisti(self, deger):
         """Sayfa başı kayıt sayısı değişti"""
         self.sayfa_basi_kayit = int(deger)
         self.mevcut_sayfa = 1
-        self._sayfalama_guncelle()
+        self.listeyi_yenile()  # Yeni sayfa boyutuyla yeniden yükle
     
     def durum_filtre_sec(self, durum):
         """Durum filtre butonuna tıklandığında"""
@@ -2835,51 +3430,23 @@ class SikayetArsivi(ctk.CTkFrame):
             else:
                 btn.configure(fg_color="transparent", text_color=renk)
     
-    def filtrele(self):
-        """Arama ve filtreleme işlemi"""
-        arama = self.entry_arama.get().strip().lower()
+    def filtrele(self, *args):
+        """Arama tetikleyici (Debounced) - PERFORMANS OPTİMİZASYONU"""
+        # Önceki bekleyen işlemi iptal et
+        if self.filtre_job:
+            self.after_cancel(self.filtre_job)
+            
+        # 300ms bekle ve filtrele (Debounce)
+        self.filtre_job = self.after(300, self._filtrele_uygula)
         
-        # Verileri her zaman güncel al (kopya sorunu çözümü)
-        self.tum_kayitlar = self.db.sikayetleri_getir()
-        
-        self.filtreli_kayitlar = []
-        for kayit in self.tum_kayitlar:
-            # Arama filtresi
-            if arama:
-                yolcu = str(kayit[2] or "").lower()
-                pnr = str(kayit[5] or "").lower()
-                sikayet_no = str(kayit[1] or "").lower()
-                detay = str(kayit[8] or "").lower()
-                guzergah = str(kayit[4] or "").lower()
-                telefon = str(kayit[11] or "").lower() if len(kayit) > 11 else ""
-                eposta = str(kayit[12] or "").lower() if len(kayit) > 12 else ""
-                plaka = str(kayit[13] or "").lower() if len(kayit) > 13 else ""
-                
-                if not (arama in yolcu or arama in pnr or arama in sikayet_no or arama in detay or arama in guzergah or arama in telefon or arama in eposta or arama in plaka):
-                    continue
-            
-            # Durum filtresi
-            if self.aktif_durum_filtre != "Tümü":
-                if kayit[10] != self.aktif_durum_filtre:
-                    continue
-            
-            # Öncelik filtresi
-            if self.aktif_oncelik_filtre != "Tümü":
-                oncelik = kayit[16] if len(kayit) > 16 else ""
-                if oncelik != self.aktif_oncelik_filtre:
-                    continue
-            
-            # Tür filtresi
-            if self.aktif_tur_filtre != "Tümü":
-                tur = kayit[14] if len(kayit) > 14 else ""
-                if tur != self.aktif_tur_filtre:
-                    continue
-            
-            self.filtreli_kayitlar.append(kayit)
-        
-        # İlk sayfaya dön ve göster
-        self.mevcut_sayfa = 1
-        self._sayfalama_guncelle()
+    def _filtrele_uygula(self):
+        """
+        Gerçek filtreleme işlemi
+        PERFORMANS: Artık bellekte filtreleme yapmıyoruz!
+        Filtreleme veritabanı seviyesinde yapılıyor (listeyi_yenile içinde)
+        """
+        self.mevcut_sayfa = 1  # İlk sayfaya dön
+        self.listeyi_yenile()  # Veritabanından filtreli veriyi çek
     
     def filtreleri_temizle(self):
         """Tüm filtreleri temizle"""
@@ -3242,7 +3809,7 @@ class SikayetArsivi(ctk.CTkFrame):
             # sikayet_islemleri'nden manuel işlemleri ekle
             if tum_islemler:
                 for islem in tum_islemler:
-                    islem_turu = islem[3] if len(islem) > 3 else ""
+                    islem_turu = str(islem[5]) if len(islem) > 5 else ""
                     islem_turu_upper = islem_turu.upper()
                     # Otomatik işlem mi kontrol et
                     otomatik_mi = False
@@ -3251,7 +3818,20 @@ class SikayetArsivi(ctk.CTkFrame):
                             otomatik_mi = True
                             break
                     if islem_turu and not otomatik_mi:
-                        islemler.append(islem)
+                        # DB Tuple: (id[0], sikayet_id[1], tarih[2], k_id[3], k_adi[4], tur[5], ack[6], eski[7], yeni[8])
+                        # Hedef Tuple: (id, tarih, kullanici_adi, islem_turu, aciklama, eski, yeni)
+                        # Notlar formatıyla uyumlu hale getiriyoruz
+                        
+                        yeni_tuple = (
+                            islem[0],       # id
+                            islem[2],       # tarih (indeks 2 -> 1)
+                            islem[4],       # kullanici_adi (indeks 4 -> 2)
+                            islem[5],       # islem_turu (indeks 5 -> 3 - "NOT" formatında da bu beklenecek)
+                            islem[6],       # aciklama (indeks 6 -> 4)
+                            islem[7],       # eski
+                            islem[8]        # yeni
+                        )
+                        islemler.append(yeni_tuple)
             
             # Tarihe göre sırala (en yeniden en eskiye)
             islemler.sort(key=lambda x: x[1] if x[1] else "", reverse=True)
@@ -4558,28 +5138,15 @@ class SifreDegistir(ctk.CTkToplevel):
         self.destroy()
 
 
-class GirisEkrani(ctk.CTkToplevel):
+class GirisEkrani(ctk.CTkFrame):
     def __init__(self, parent, db, callback):
-        super().__init__(parent)
+        super().__init__(parent, fg_color=("white", "gray17"))
         self.db = db
         self.callback = callback
         
-        self.title("Giriş Yap")
-        self.geometry("500x580")
-        self.resizable(False, False)
-        
-        # Pencereyi ortala
-        self.update_idletasks()
-        x = (self.winfo_screenwidth() // 2) - (500 // 2)
-        y = (self.winfo_screenheight() // 2) - (580 // 2)
-        self.geometry(f"500x580+{x}+{y}")
-        
-        # Kapatma düğmesini devre dışı bırak
-        self.protocol("WM_DELETE_WINDOW", self.kapat)
-        
-        # Ana Frame
+        # Ana Frame - pack kullan
         frame = ctk.CTkFrame(self, fg_color="transparent")
-        frame.pack(fill="both", expand=True, padx=40, pady=40)
+        frame.pack(expand=True, padx=40, pady=40)
         
         # Logo için placeholder label
         self.logo_label = ctk.CTkLabel(frame, text="")
@@ -4625,25 +5192,742 @@ class GirisEkrani(ctk.CTkToplevel):
         sifre = self.entry_sifre.get()
         
         if not kullanici_adi or not sifre:
-            self.lift()
-            self.focus_force()
-            messagebox.showwarning("Uyarı", "Kullanıcı adı ve şifre gereklidir.", parent=self)
+            messagebox.showwarning("Uyarı", "Kullanıcı adı ve şifre gereklidir.")
             return
         
         kullanici = self.db.giris_yap(kullanici_adi, sifre)
         
         if kullanici:
+            # Başarılı giriş
             self.callback(kullanici)
-            self.destroy()
         else:
-            self.lift()
-            self.focus_force()
-            messagebox.showerror("Giriş Hatası", "Kullanıcı adı veya şifre hatalı!", parent=self)
+            # Hatalı giriş
+            # Animasyonlu uyarı
+            AnimationController.shake_widget(self.entry_kullanici)
+            AnimationController.shake_widget(self.entry_sifre)
             self.entry_sifre.delete(0, "end")
-            self.entry_sifre.focus()
-    
+            
+            # Hata mesajı
+            messagebox.showerror("Hata", "Kullanıcı adı veya şifre hatalı!")
+
+
+
+class SikayetDetayPenceresi(ctk.CTkFrame):
+    def __init__(self, parent, db, kayit, controller):
+        super().__init__(parent, fg_color=("#f8fafc", "#0f172a"))  # Modern açık/koyu tonlar
+        self.db = db
+        self.kayit = kayit
+        self.controller = controller
+        
+        # Grid yapılandırması
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1) # İçerik alanı esnek
+        
+        # --- ÜST BAR (Header) - Gradyan efekti için ---
+        self.ust_bar = ctk.CTkFrame(self, height=70, corner_radius=0, 
+                                    fg_color=("#ffffff", "#1e293b"))  # Beyaz/Koyu mavi
+        self.ust_bar.grid(row=0, column=0, sticky="ew")
+        self.ust_bar.grid_propagate(False)
+        
+        # Sol taraf - Geri butonu ve başlık
+        sol_frame = ctk.CTkFrame(self.ust_bar, fg_color="transparent")
+        sol_frame.pack(side="left", fill="y", padx=20, pady=15)
+        
+        # Geri Dön Butonu - Modern tasarım
+        geri_btn = ctk.CTkButton(sol_frame, text="← Geri", command=self.kapat,
+                      width=90, height=40, corner_radius=10,
+                      fg_color=("gray90", "gray25"), 
+                      text_color=("#334155", "#cbd5e1"), 
+                      hover_color=("#e2e8f0", "#334155"), 
+                      font=ctk.CTkFont(size=14, weight="bold"),
+                      border_width=0)
+        geri_btn.pack(side="left", padx=(0, 15))
+        
+        # Başlık container
+        baslik_frame = ctk.CTkFrame(sol_frame, fg_color="transparent")
+        baslik_frame.pack(side="left")
+        
+        # Üst başlık (küçük)
+        ctk.CTkLabel(baslik_frame, text="Şikayet Detayı", 
+                    font=ctk.CTkFont(size=11, weight="normal"),
+                    text_color=("#64748b", "#94a3b8")).pack(anchor="w")
+        
+        # Ana başlık (büyük, bold)
+        ctk.CTkLabel(baslik_frame, text=f"{kayit[1]}", 
+                    font=ctk.CTkFont(size=20, weight="bold"),
+                    text_color=("#0f172a", "#f1f5f9")).pack(anchor="w")
+        
+        # Sağ Taraf Aksiyon Butonları
+        btn_frame = ctk.CTkFrame(self.ust_bar, fg_color="transparent")
+        btn_frame.pack(side="right", padx=20, pady=15)
+        
+        # Modern buton stili
+        btn_style = {
+            "height": 40,
+            "corner_radius": 10,
+            "font": ctk.CTkFont(size=13, weight="bold"),
+            "border_width": 0
+        }
+        
+        # Tümünü Kopyala - Mor gradyan
+        ctk.CTkButton(btn_frame, text="📋 Kopyala", width=110,
+                      fg_color="#8b5cf6", hover_color="#7c3aed",
+                      command=self.tumunu_kopyala, **btn_style).pack(side="left", padx=3)
+        
+        # Düzenle - Mavi
+        ctk.CTkButton(btn_frame, text="✏️ Düzenle", width=100,
+                      fg_color="#3b82f6", hover_color="#2563eb",
+                      command=lambda: self.controller.frames["SikayetArsivi"].duzenle_kayit(kayit),
+                      **btn_style).pack(side="left", padx=3)
+                      
+        # Durum Değiştir - Yeşil
+        ctk.CTkButton(btn_frame, text="🔄 Durum", width=100,
+                      fg_color="#10b981", hover_color="#059669",
+                      command=lambda: self.controller.frames["SikayetArsivi"].durum_degistir_kayit(kayit),
+                      **btn_style).pack(side="left", padx=3)
+        
+        # Sil - Kırmızı
+        ctk.CTkButton(btn_frame, text="🗑️", width=50,
+                      fg_color="#ef4444", hover_color="#dc2626",
+                      command=lambda: self.sil_ve_kapat(kayit),
+                      **btn_style).pack(side="left", padx=3)
+                      
+        # --- ANA İÇERİK (Scrollable) ---
+        self.scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self.scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=20)
+        
+        # İki sütunlu yapı
+        self.scroll.grid_columnconfigure(0, weight=1)
+        self.scroll.grid_columnconfigure(1, weight=1)
+        
+        # Sol Taraf: Bilgiler
+        self.sol_panel = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        self.sol_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        # -- Yolcu Bilgileri --
+        self.bilgi_karti("👤 Yolcu Bilgileri", [
+            ("Ad Soyad", kayit[2]),
+            ("TC Kimlik", kayit[20] if len(kayit) > 20 else "-"),
+            ("Telefon", kayit[11] if len(kayit) > 11 else "-"),
+            ("E-posta", kayit[12] if len(kayit) > 12 else "-")
+        ], self.sol_panel)
+        
+        # -- Sefer Bilgileri --
+        self.bilgi_karti("🚌 Sefer Bilgileri", [
+            ("Tarih", kayit[3]),
+            ("Güzergah", kayit[4]),
+            ("PNR", kayit[5]),
+            ("Plaka", kayit[13] if len(kayit) > 13 else "-"),
+            ("Koltuk", kayit[21] if len(kayit) > 21 else "-")
+        ], self.sol_panel)
+        
+        # Sağ Taraf: Şikayet Detayı
+        self.sag_panel = ctk.CTkFrame(self.scroll, fg_color="transparent")
+        self.sag_panel.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        
+        # -- Durum ve Tür --
+        durum_renk = "#22c55e" if kayit[10] == "Çözüldü" else "#f59e0b" if kayit[10] == "İşlemde" else "#ef4444"
+        self.bilgi_karti("📌 Durum & Tür", [
+            ("Şikayet Türü", kayit[14] if len(kayit) > 14 else "-"),
+            ("Öncelik", kayit[16] if len(kayit) > 16 else "-"),
+            ("Durum", kayit[10] or "Yeni"),
+            ("Kayıt Tarihi", str(kayit[9])[:16])
+        ], self.sag_panel, baslik_renk=durum_renk)
+        
+        # -- Açıklama --
+        frame = ctk.CTkFrame(self.sag_panel, 
+                            fg_color=("#ffffff", "#1e293b"), 
+                            corner_radius=16,
+                            border_width=1,
+                            border_color=("#e2e8f0", "#334155"))
+        frame.pack(fill="x", pady=(0, 16))
+        
+        # Başlık
+        ctk.CTkLabel(frame, text="📝 Şikayet Detayı", 
+                     font=ctk.CTkFont(size=15, weight="bold"), 
+                     text_color="#3b82f6",
+                     anchor="w").pack(anchor="w", padx=20, pady=(18, 8))
+        
+        # Ayırıcı
+        ctk.CTkFrame(frame, height=1, fg_color=("#e2e8f0", "#334155")).pack(fill="x", padx=20, pady=(0, 12))
+        
+        # Şikayet detayı container
+        detay_container = ctk.CTkFrame(frame,
+                                      fg_color=("#f8fafc", "#0f172a"),
+                                      corner_radius=10,
+                                      border_width=1,
+                                      border_color=("#e2e8f0", "#334155"))
+        detay_container.pack(padx=20, pady=(0, 18), fill="both", expand=True)
+        
+        # Şikayet detayı - SEÇİLEBİLİR CTkTextbox
+        detay_text = ctk.CTkTextbox(detay_container, 
+                                    font=ctk.CTkFont(size=13, weight="normal"), 
+                                    height=150,
+                                    border_width=0, 
+                                    fg_color="transparent", 
+                                    wrap="word",
+                                    text_color=("#0f172a", "#f1f5f9"))
+        detay_text.insert("1.0", kayit[8] or "")
+        detay_text.pack(padx=12, pady=12, fill="both", expand=True)
+        
+        # Düzenlenemez ama seçilebilir yap
+        def on_key(event):
+            if event.state & 4 and event.keysym.lower() in ['c', 'a', 'x']:
+                return  # Ctrl+C, Ctrl+A, Ctrl+X'e izin ver
+            if event.keysym in ['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Prior', 'Next']:
+                return  # Navigasyon tuşlarına izin ver
+            return "break"  # Diğer tuşları engelle
+        
+        detay_text.bind("<Key>", on_key)
+        
+        # -- Hızlı İşlem Ekle --
+        ekle_frame = ctk.CTkFrame(self.sag_panel, 
+                                 fg_color=("#ffffff", "#1e293b"), 
+                                 corner_radius=16,
+                                 border_width=1,
+                                 border_color=("#e2e8f0", "#334155"))
+        ekle_frame.pack(fill="x", pady=(0, 16))
+        
+        # Başlık
+        ctk.CTkLabel(ekle_frame, text="➕ Yeni İşlem / Not", 
+                     font=ctk.CTkFont(size=15, weight="bold"), 
+                     text_color="#8b5cf6",
+                     anchor="w").pack(anchor="w", padx=20, pady=(18, 8))
+        
+        # Ayırıcı
+        ctk.CTkFrame(ekle_frame, height=1, fg_color=("#e2e8f0", "#334155")).pack(fill="x", padx=20, pady=(0, 12))
+        
+        # Form container
+        form_container = ctk.CTkFrame(ekle_frame, fg_color="transparent")
+        form_container.pack(fill="x", padx=20, pady=(0, 18))
+        
+        secenekler = [
+            "NOT", 
+            "TAZMİNAT İŞLEMİ", 
+            "BİLET İADE İŞLEMİ", 
+            "BİLET DEĞİŞİMİ / AÇIĞA ALMA", 
+            "BAGAJ ARAŞTIRMA", 
+            "PERSONEL İLE GÖRÜŞME", 
+            "YOLCU İLE GÖRÜŞME", 
+            "DİĞER"
+        ]
+        
+        # ComboBox - Modern stil
+        self.combo_islem_turu = ctk.CTkComboBox(form_container, 
+                                                values=secenekler,
+                                                height=40,
+                                                corner_radius=10,
+                                                border_width=1,
+                                                border_color=("#e2e8f0", "#334155"),
+                                                button_color=("#8b5cf6", "#7c3aed"),
+                                                button_hover_color=("#7c3aed", "#6d28d9"),
+                                                dropdown_fg_color=("#ffffff", "#1e293b"),
+                                                font=ctk.CTkFont(size=13))
+        self.combo_islem_turu.pack(fill="x", pady=(0, 12))
+        self.combo_islem_turu.set("NOT")
+        
+        # Entry - Modern stil
+        self.entry_islem_aciklama = ctk.CTkEntry(form_container, 
+                                                placeholder_text="Açıklama giriniz...",
+                                                height=40,
+                                                corner_radius=10,
+                                                border_width=1,
+                                                border_color=("#e2e8f0", "#334155"),
+                                                fg_color=("#f8fafc", "#0f172a"),
+                                                font=ctk.CTkFont(size=13))
+        self.entry_islem_aciklama.pack(fill="x", pady=(0, 12))
+        
+        # Ekle Butonu - Modern, büyük
+        ctk.CTkButton(form_container, 
+                     text="✓ Ekle", 
+                     command=self.islem_kaydet,
+                     height=42,
+                     corner_radius=10,
+                     fg_color="#8b5cf6", 
+                     hover_color="#7c3aed",
+                     font=ctk.CTkFont(size=14, weight="bold")).pack(fill="x")
+        
+        
+        # -- Son İşlemler / Notlar (YENİ) --
+        gecmis_frame = ctk.CTkFrame(self.sag_panel, 
+                                   fg_color=("#ffffff", "#1e293b"), 
+                                   corner_radius=16,
+                                   border_width=1,
+                                   border_color=("#e2e8f0", "#334155"))
+        gecmis_frame.pack(fill="x", pady=(0, 16))
+
+        # Başlık
+        ctk.CTkLabel(gecmis_frame, text="🕒 Son Notlar & İşlemler", 
+                     font=ctk.CTkFont(size=15, weight="bold"), 
+                     text_color="#f59e0b",
+                     anchor="w").pack(anchor="w", padx=20, pady=(18, 8))
+        
+        # Ayırıcı
+        ctk.CTkFrame(gecmis_frame, height=1, fg_color=("#e2e8f0", "#334155")).pack(fill="x", padx=20, pady=(0, 12))
+        
+        # Scrollable alan
+        self.gecmis_listesi = ctk.CTkScrollableFrame(gecmis_frame, 
+                                                     height=180, 
+                                                     fg_color="transparent",
+                                                     corner_radius=0)
+        self.gecmis_listesi.pack(fill="x", padx=12, pady=(0, 12))
+        
+        # -- Diğer İşlemler --
+        islem_frame = ctk.CTkFrame(self.sag_panel, fg_color="transparent")
+        islem_frame.pack(fill="x", pady=(0, 20))
+        
+        # Modern buton stili
+        btn_style_islem = {
+            "height": 45,
+            "corner_radius": 12,
+            "font": ctk.CTkFont(size=14, weight="bold"),
+            "border_width": 0
+        }
+        
+        ctk.CTkButton(islem_frame, text="📄 PDF İndir", 
+                      fg_color="#3b82f6", hover_color="#2563eb",
+                      command=lambda: self.controller.frames["SikayetArsivi"].pdf_indir_kayit(kayit),
+                      **btn_style_islem).pack(fill="x", pady=(0, 8))
+                      
+        ctk.CTkButton(islem_frame, text="📜 Detaylı İşlem Geçmişi", 
+                      fg_color="#a855f7", hover_color="#9333ea",
+                      command=lambda: self.controller.frames["SikayetArsivi"].islem_gecmisi_goster_kayit(kayit),
+                      **btn_style_islem).pack(fill="x")
+        
+        # Listeyi ilk kez doldur
+        self.gecmis_guncelle()
+
+    def bilgi_karti(self, baslik, veriler, parent, baslik_renk="#3b82f6"):
+        # Modern kart container - Glassmorphism efekti
+        frame = ctk.CTkFrame(parent, 
+                            fg_color=("#ffffff", "#1e293b"),  # Beyaz/Koyu mavi
+                            corner_radius=16,
+                            border_width=1,
+                            border_color=("#e2e8f0", "#334155"))
+        frame.pack(fill="x", pady=(0, 16))
+        
+        # Başlık bölümü - Gradyan arka plan efekti
+        baslik_container = ctk.CTkFrame(frame, 
+                                       fg_color="transparent",
+                                       corner_radius=0)
+        baslik_container.pack(fill="x", padx=0, pady=0)
+        
+        # İkon ve başlık
+        baslik_label = ctk.CTkLabel(baslik_container, text=baslik, 
+                     font=ctk.CTkFont(size=15, weight="bold"), 
+                     text_color=baslik_renk,
+                     anchor="w")
+        baslik_label.pack(anchor="w", padx=20, pady=(18, 12))
+        
+        # İnce ayırıcı çizgi
+        ayirici = ctk.CTkFrame(frame, height=1, 
+                              fg_color=("#e2e8f0", "#334155"))
+        ayirici.pack(fill="x", padx=20, pady=(0, 12))
+        
+        # Veriler container
+        veriler_container = ctk.CTkFrame(frame, fg_color="transparent")
+        veriler_container.pack(fill="x", padx=20, pady=(0, 18))
+        
+        for idx, (etiket, deger) in enumerate(veriler):
+            # Her satır için container
+            row = ctk.CTkFrame(veriler_container, fg_color="transparent", height=35)
+            row.pack(fill="x", pady=4)
+            
+            # Etiket - Modern, hafif gri
+            etiket_label = ctk.CTkLabel(row, 
+                        text=etiket, 
+                        font=ctk.CTkFont(size=12, weight="bold"), 
+                        width=120, 
+                        anchor="w",
+                        text_color=("#64748b", "#94a3b8"))
+            etiket_label.pack(side="left", padx=(0, 12))
+            
+            # Değer container - Hover efekti için
+            deger_container = ctk.CTkFrame(row, 
+                                          fg_color=("#f8fafc", "#0f172a"),
+                                          corner_radius=8,
+                                          border_width=1,
+                                          border_color=("#e2e8f0", "#334155"))
+            deger_container.pack(side="left", fill="x", expand=True)
+            
+            # Değer textbox - SEÇİLEBİLİR
+            deger_textbox = ctk.CTkTextbox(deger_container, 
+                                          font=ctk.CTkFont(size=13, weight="normal"), 
+                                          border_width=0, 
+                                          fg_color="transparent", 
+                                          height=28, 
+                                          wrap="none",
+                                          text_color=("#0f172a", "#f1f5f9"))
+            deger_textbox.insert("1.0", str(deger))
+            deger_textbox.pack(fill="both", expand=True, padx=12, pady=4)
+            
+            # Düzenlenemez ama seçilebilir yap
+            def on_key(event):
+                if event.state & 4 and event.keysym.lower() in ['c', 'a', 'x']:
+                    return
+                if event.keysym in ['Left', 'Right', 'Up', 'Down', 'Home', 'End']:
+                    return
+                return "break"
+            
+            deger_textbox.bind("<Key>", on_key)
+
+    def islem_kaydet(self):
+        tur = self.combo_islem_turu.get()
+        aciklama = self.entry_islem_aciklama.get().strip()
+        
+        if not aciklama:
+            try: AnimationController.shake_widget(self.entry_islem_aciklama)
+            except: pass
+            return
+
+        if self.controller.aktif_kullanici:
+            try:
+                self.db.sikayet_islemi_ekle(
+                    sikayet_id=self.kayit[0],
+                    kullanici_id=self.controller.aktif_kullanici.get('id'),
+                    kullanici_adi=self.controller.aktif_kullanici.get('kullanici_adi'),
+                    islem_turu=tur,
+                    aciklama=aciklama
+                )
+                self.entry_islem_aciklama.delete(0, "end")
+                self.entry_islem_aciklama.delete(0, "end")
+                ToastNotification(self.controller, "Başarılı", "İşlem kaydedildi.")
+                # Listeyi güncelle
+                self.gecmis_guncelle()
+            except Exception as e:
+                print(f"Hata: {e}")
+
+    def gecmis_guncelle(self):
+        """Son işlemleri ve notları listele"""
+        try:
+            # Mevcut listeyi temizle
+            for widget in self.gecmis_listesi.winfo_children():
+                widget.destroy()
+            
+            sikayet_id = self.kayit[0]
+            
+            # Notları ve İşlemleri Al
+            tum_notlar = self.db.notlari_getir(sikayet_id)
+            tum_islemler = self.db.sikayet_islemlerini_getir(sikayet_id)
+            
+            # Hepsini tek listede birleştir
+            birlestirilmis = []
+            
+            # Notlar: (id, kullanici_adi, not_metni, olusturma_tarihi)
+            if tum_notlar:
+                for not_kayit in tum_notlar:
+                    birlestirilmis.append({
+                        "id": not_kayit[0],
+                        "kayit_turu": "NOT",
+                        "tarih": not_kayit[3],
+                        "kullanici": not_kayit[1],
+                        "tur": "NOT",
+                        "aciklama": not_kayit[2],
+                        "ikon": "📝",
+                        "renk": "#9B59B6"
+                    })
+            
+            # İşlemler: (id, tarih, kullanici_adi, islem_turu, aciklama, eski, yeni) (DÜZELTİLMİŞ FORMAT)
+            # DİKKAT: SikayetDetayPenceresi'nde kullanılan db metodu SikayetArsivi ile aynı olabilir veya farklı olabilir.
+            # VeritabaniYonetici.sikayet_islemlerini_getir genellikle 7 sütun döndürürdü ama main.py içinde fixledik mi?
+            # Kontrol edelim: SikayetArsivi.islem_gecmisi_goster_kayit içinde unpack yapıyoruz. 
+            # Veritabanı sınıfı 9 sütun döndürüyor.
+            
+            if tum_islemler:
+                for islem in tum_islemler:
+                    # DB Tuple: (id[0], sikayet_id[1], tarih[2], k_id[3], k_adi[4], tur[5], ack[6], eski[7], yeni[8])
+                    # Ancak db.sikayet_islemlerini_getir metodu veritabani_hybrid.py içinde ne döndürüyor?
+                    # Kontrol etmediysek varsayım yapmayalım. 
+                    # 293. satırda main.py içinde islem[6] ve islem[7] kullanılmıştı (eski main.py).
+                    # Yeni düzeltmede: islem[5] tur, islem[6] açıklama dedik.
+                    
+                    # Otomatik log filtreleme
+                    tur = islem[5] # islem_turu
+                    ack = islem[6] # aciklama
+                    tarih = islem[2]
+                    kullanici = islem[4]
+                    
+                    tur_upper = str(tur).upper()
+                    otomatik_anahtar_kelimeler = ["DURUM", "GÜNCELLE", "OLUŞTUR", "SİL", "DOSYA", "ETİKET", "HATIRLATICI"]
+                    otomatik_mi = False
+                    for k in otomatik_anahtar_kelimeler:
+                        if k in tur_upper: otomatik_mi = True; break
+                        
+                    if not otomatik_mi:
+                        birlestirilmis.append({
+                            "id": islem[0],
+                            "kayit_turu": "ISLEM",
+                            "tarih": tarih,
+                            "kullanici": kullanici,
+                            "tur": tur,
+                            "aciklama": ack,
+                            "ikon": "📌",
+                            "renk": "#3B8ED0"
+                        })
+
+            # Tarihe göre sırala (Yeniden eskiye)
+            birlestirilmis.sort(key=lambda x: x["tarih"] if x["tarih"] else "", reverse=True)
+            
+            # Listele (Max 10)
+            if not birlestirilmis:
+                ctk.CTkLabel(self.gecmis_listesi, text="Henüz kayıt yok.", text_color="gray").pack(pady=20)
+                return
+
+            for item in birlestirilmis[:10]:
+                # Modern kart tasarımı
+                kart = ctk.CTkFrame(self.gecmis_listesi, 
+                                   fg_color=("#f8fafc", "#0f172a"), 
+                                   corner_radius=10,
+                                   border_width=1,
+                                   border_color=("#e2e8f0", "#334155"))
+                kart.pack(fill="x", pady=4, padx=4)
+                
+                # Üst: İkon, Tür, Tarih
+                ust = ctk.CTkFrame(kart, fg_color="transparent")
+                ust.pack(fill="x", padx=12, pady=(10, 4))
+                
+                # Tür ve ikon - Sol taraf
+                tur_label = ctk.CTkLabel(ust, 
+                           text=f"{item['ikon']} {item['tur']}", 
+                           font=ctk.CTkFont(size=12, weight="bold"), 
+                           text_color=item['renk'])
+                tur_label.pack(side="left")
+                           
+                # Tarih - Sağ taraf
+                tarih_label = ctk.CTkLabel(ust, 
+                            text=str(item['tarih'])[:16], 
+                            font=ctk.CTkFont(size=10), 
+                            text_color=("#64748b", "#94a3b8"))
+                tarih_label.pack(side="right")
+                
+                # Alt: Kullanıcı ve Açıklama
+                alt = ctk.CTkFrame(kart, fg_color="transparent")
+                alt.pack(fill="x", padx=12, pady=(0, 10))
+
+                if item['aciklama']:
+                    # Açıklama metni - SEÇİLEBİLİR
+                    aciklama_text = ctk.CTkTextbox(alt, 
+                                                   font=ctk.CTkFont(size=12),
+                                                   border_width=0, 
+                                                   fg_color="transparent",
+                                                   height=45, 
+                                                   wrap="word",
+                                                   text_color=("#0f172a", "#e2e8f0"))
+                    aciklama_text.insert("1.0", item['aciklama'])
+                    aciklama_text.pack(side="left", fill="both", expand=True)
+                    
+                    # Düzenlenemez ama seçilebilir yap
+                    def on_key_note(event):
+                        if event.state & 4 and event.keysym.lower() in ['c', 'a', 'x']:
+                            return
+                        if event.keysym in ['Left', 'Right', 'Up', 'Down', 'Home', 'End', 'Prior', 'Next']:
+                            return
+                        return "break"
+                    
+                    aciklama_text.bind("<Key>", on_key_note)
+                else:
+                    # Kullanıcı bilgisi - SEÇİLEBİLİR
+                    kullanici_text = ctk.CTkTextbox(alt, 
+                                                    font=ctk.CTkFont(size=11),
+                                                    border_width=0, 
+                                                    fg_color="transparent",
+                                                    height=25, 
+                                                    wrap="none",
+                                                    text_color=("#64748b", "#94a3b8"))
+                    kullanici_text.insert("1.0", f"👤 {item['kullanici']}")
+                    kullanici_text.pack(side="left", fill="both", expand=True)
+                    
+                    def on_key_user(event):
+                        if event.state & 4 and event.keysym.lower() in ['c', 'a', 'x']:
+                            return
+                        if event.keysym in ['Left', 'Right', 'Up', 'Down', 'Home', 'End']:
+                            return
+                        return "break"
+                    
+                    kullanici_text.bind("<Key>", on_key_user)
+
+                # Sil Butonu (Yetki Kontrolü)
+                if hasattr(self.controller, 'aktif_kullanici') and self.controller.aktif_kullanici:
+                    kullanici_adi = self.controller.aktif_kullanici.get('kullanici_adi')
+                    rol = self.controller.aktif_kullanici.get('rol')
+                    
+                    # Admin veya kaydın sahibi silebilir
+                    if rol == 'admin' or kullanici_adi == item['kullanici']:
+                        cmd = None
+                        if item['kayit_turu'] == 'NOT':
+                            cmd = lambda nid=item['id']: self.not_sil(nid)
+                        elif item['kayit_turu'] == 'ISLEM':
+                            cmd = lambda iid=item['id']: self.islem_sil(iid)
+                            
+                        if cmd:
+                            sil_btn = ctk.CTkButton(alt, text="🗑️", 
+                                        width=30, height=30,
+                                        corner_radius=8,
+                                        fg_color="transparent", 
+                                        hover_color=("#fee2e2", "#7f1d1d"),
+                                        text_color=("#ef4444", "#f87171"),
+                                        font=ctk.CTkFont(size=14),
+                                        command=cmd)
+                            sil_btn.pack(side="right", padx=(8, 0))
+
+
+        except Exception as e:
+            print(f"Geçmiş güncelleme hatası: {e}")
+
+    def not_sil(self, not_id):
+        """Notu sil"""
+        try:
+            onay = messagebox.askyesno("Onay", "Bu notu silmek istediğinize emin misiniz?", parent=self)
+            if onay:
+                self.db.not_sil(not_id)
+                self.gecmis_guncelle()
+        except Exception as e:
+            messagebox.showerror("Hata", f"Silme işlemi başarısız: {e}", parent=self)
+
+    def islem_sil(self, islem_id):
+        """İşlemi sil"""
+        try:
+            onay = messagebox.askyesno("Onay", "Bu işlem kaydını silmek istediğinize emin misiniz?", parent=self)
+            if onay:
+                self.db.sikayet_islemini_sil(islem_id)
+                self.gecmis_guncelle()
+        except Exception as e:
+            messagebox.showerror("Hata", f"Silme işlemi başarısız: {e}", parent=self)
+
     def kapat(self):
-        self.master.destroy()
+        # Sağa kayarak kapan
+        def slide_out(step=0):
+            if not self.winfo_exists(): return
+            if step > 20: 
+                self.place_forget()
+                self.destroy()
+                return
+            progress = step / 20
+            ease = progress * (2 - progress)
+            try:
+                self.place(relx=ease, rely=0.0)
+                self.after(10, lambda: slide_out(step + 1))
+            except: pass
+        
+        slide_out()
+        
+    def sil_ve_kapat(self, kayit):
+        self.controller.frames["SikayetArsivi"].sil_kayit(kayit)
+        self.kapat()
+    
+    def tumunu_kopyala(self):
+        """Tüm şikayet bilgilerini panoya kopyala"""
+        try:
+            kayit = self.kayit
+            
+            # Tüm bilgileri birleştir
+            metin_parcalari = []
+            
+            # Başlık
+            metin_parcalari.append(f"ŞİKAYET DETAYI: {kayit[1]}")
+            metin_parcalari.append("=" * 60)
+            metin_parcalari.append("")
+            
+            # Yolcu Bilgileri
+            metin_parcalari.append("👤 YOLCU BİLGİLERİ")
+            metin_parcalari.append("-" * 60)
+            metin_parcalari.append(f"Ad Soyad: {kayit[2]}")
+            metin_parcalari.append(f"TC Kimlik: {kayit[20] if len(kayit) > 20 else '-'}")
+            metin_parcalari.append(f"Telefon: {kayit[11] if len(kayit) > 11 else '-'}")
+            metin_parcalari.append(f"E-posta: {kayit[12] if len(kayit) > 12 else '-'}")
+            metin_parcalari.append("")
+            
+            # Sefer Bilgileri
+            metin_parcalari.append("🚌 SEFER BİLGİLERİ")
+            metin_parcalari.append("-" * 60)
+            metin_parcalari.append(f"Tarih: {kayit[3]}")
+            metin_parcalari.append(f"Güzergah: {kayit[4]}")
+            metin_parcalari.append(f"PNR: {kayit[5]}")
+            metin_parcalari.append(f"Plaka: {kayit[13] if len(kayit) > 13 else '-'}")
+            metin_parcalari.append(f"Koltuk: {kayit[21] if len(kayit) > 21 else '-'}")
+            metin_parcalari.append("")
+            
+            # Durum & Tür
+            metin_parcalari.append("📌 DURUM & TÜR")
+            metin_parcalari.append("-" * 60)
+            metin_parcalari.append(f"Şikayet Türü: {kayit[14] if len(kayit) > 14 else '-'}")
+            metin_parcalari.append(f"Öncelik: {kayit[16] if len(kayit) > 16 else '-'}")
+            metin_parcalari.append(f"Durum: {kayit[10] or 'Yeni'}")
+            metin_parcalari.append(f"Kayıt Tarihi: {str(kayit[9])[:16]}")
+            metin_parcalari.append("")
+            
+            # Şikayet Detayı
+            metin_parcalari.append("📝 ŞİKAYET DETAYI")
+            metin_parcalari.append("-" * 60)
+            metin_parcalari.append(kayit[8] or "")
+            metin_parcalari.append("")
+            
+            # Son Notlar & İşlemler
+            try:
+                sikayet_id = kayit[0]
+                tum_notlar = self.db.notlari_getir(sikayet_id)
+                tum_islemler = self.db.sikayet_islemlerini_getir(sikayet_id)
+                
+                birlestirilmis = []
+                
+                if tum_notlar:
+                    for not_kayit in tum_notlar:
+                        birlestirilmis.append({
+                            "tarih": not_kayit[3],
+                            "kullanici": not_kayit[1],
+                            "tur": "NOT",
+                            "aciklama": not_kayit[2]
+                        })
+                
+                if tum_islemler:
+                    for islem in tum_islemler:
+                        tur = islem[5]
+                        tur_upper = str(tur).upper()
+                        otomatik_anahtar_kelimeler = ["DURUM", "GÜNCELLE", "OLUŞTUR", "SİL", "DOSYA", "ETİKET", "HATIRLATICI"]
+                        otomatik_mi = any(k in tur_upper for k in otomatik_anahtar_kelimeler)
+                        
+                        if not otomatik_mi:
+                            birlestirilmis.append({
+                                "tarih": islem[2],
+                                "kullanici": islem[4],
+                                "tur": tur,
+                                "aciklama": islem[6]
+                            })
+                
+                birlestirilmis.sort(key=lambda x: x["tarih"] if x["tarih"] else "", reverse=True)
+                
+                if birlestirilmis:
+                    metin_parcalari.append("🕒 SON NOTLAR & İŞLEMLER")
+                    metin_parcalari.append("-" * 60)
+                    for item in birlestirilmis[:10]:
+                        metin_parcalari.append(f"[{str(item['tarih'])[:16]}] {item['tur']}")
+                        metin_parcalari.append(f"  Kullanıcı: {item['kullanici']}")
+                        if item['aciklama']:
+                            metin_parcalari.append(f"  {item['aciklama']}")
+                        metin_parcalari.append("")
+            except Exception as e:
+                print(f"Not/işlem kopyalama hatası: {e}")
+            
+            # Tüm metni birleştir
+            tam_metin = "\n".join(metin_parcalari)
+            
+            # Panoya kopyala
+            self.clipboard_clear()
+            self.clipboard_append(tam_metin)
+            self.update()
+            
+            # Bildirim göster
+            try:
+                ToastNotification(self.controller, "Başarılı", "Tüm bilgiler panoya kopyalandı!", icon="📋")
+            except:
+                messagebox.showinfo("Başarılı", "Tüm bilgiler panoya kopyalandı!", parent=self)
+                
+        except Exception as e:
+            print(f"Kopyalama hatası: {e}")
+            try:
+                ToastNotification(self.controller, "Hata", "Kopyalama başarısız!", icon="❌", color="#e74c3c")
+            except:
+                messagebox.showerror("Hata", f"Kopyalama başarısız: {e}", parent=self)
 
 
 class SikayetUygulamasi(ctk.CTk):
@@ -4651,22 +5935,30 @@ class SikayetUygulamasi(ctk.CTk):
         super().__init__(fg_color=("white", "gray10"))
         self.title("Şikayet Takip ve Arşivleme Sistemi")
         
-        # Pencere modunda tam ekran (Maximized) - Küçültme/Büyütme butonları aktif olur
-        self.state("zoomed")
+        # Pencereyi tam ekran yap - attributes metodu daha güvenilir
+        self.after(100, lambda: self.state('zoomed'))  # Pencere yüklendikten sonra maximize et
+        
+        # NOT: Giriş ekranı artık frame olduğu için pencereyi gizlemeye gerek yok
+        # self.withdraw()  # KALDIRILDI 
         
         # Icon
-        if os.path.exists("logo.png"):
-            try:
-                icon_image = tk.PhotoImage(file="logo.png")
-                self.iconphoto(False, icon_image)
-            except:
-                pass
+        try:
+            icon_image = tk.PhotoImage(file="logo.png")
+            self.iconphoto(False, icon_image)
+        except:
+            pass
+        
+        # Animasyon için container konfigürasyonu
+        # self.container.grid_rowconfigure... gerek yok çünkü place kullanacağız
                 
         self.db = VeritabaniYonetici()
+        self.aktif_kullanici = None
         self.aktif_kullanici = None
         
         # Günlük otomatik yedekleme
         self.otomatik_yedek_al()
+        
+
         
         self.container = ctk.CTkFrame(self, fg_color=("white", "gray17"))
         self.container.pack(side="top", fill="both", expand=True)
@@ -4678,16 +5970,45 @@ class SikayetUygulamasi(ctk.CTk):
             page_name = F.__name__
             frame = F(parent=self.container, controller=self)
             self.frames[page_name] = frame
-            frame.grid(row=0, column=0, sticky="nsew")
+            # frame.grid(row=0, column=0, sticky="nsew") 
+            # Place kullanarak animasyonlara hazırlık yapıyoruz (relwidth=1 tam ekran yapar)
+            frame.place(relwidth=1, relheight=1)
+            
+        # Başlangıçta hepsini gizle (veya ekran dışına al)
+        for f in self.frames.values():
+            f.place_forget()
         
         # Önce gizle, giriş sonrası göster
-        self.withdraw()
+        # NOT: Artık giriş ekranı frame olduğu için pencereyi göstermeliyiz
+        # self.withdraw()  # KALDIRILDI - Giriş ekranı artık frame
+        
+        # Pencereyi göster ve giriş ekranını aç
+        self.deiconify()
+        
+        # Klavye kısayollarını ayarla
+        self.setup_keyboard_shortcuts()
         
         # Giriş ekranını aç
         self.after(100, self.giris_ekrani_ac)
+
+
+
+
         
+
+
+
+
     def giris_ekrani_ac(self):
-        GirisEkrani(self, self.db, self.giris_basarili)
+        """Giriş ekranını frame olarak göster"""
+        # Giriş frame'i oluştur
+        if "GirisEkrani" in self.frames:
+            self.frames["GirisEkrani"].destroy()
+        
+        giris_frame = GirisEkrani(self.container, self.db, self.giris_basarili)
+        self.frames["GirisEkrani"] = giris_frame
+        giris_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
+        giris_frame.tkraise()
     
     def giris_basarili(self, kullanici):
         self.aktif_kullanici = kullanici
@@ -4700,8 +6021,15 @@ class SikayetUygulamasi(ctk.CTk):
             islem_detay=f"{kullanici.get('ad_soyad', '')} sisteme giriş yaptı"
         )
         
-        self.deiconify()  # Ana pencereyi göster
-        self.show_frame("AnaEkran")
+        # Giriş frame'ini gizle
+        if "GirisEkrani" in self.frames:
+            self.frames["GirisEkrani"].place_forget()
+        
+        # Ana pencereyi göster
+        self.deiconify()
+        self.state("zoomed") # Giriş başarılı olduğunda tam ekran yap
+        # Animasyonsuz ilk açılış
+        self.show_frame_direct("AnaEkran")
         
         # Kullanıcı bilgisini güncelle
         if hasattr(self.frames.get("AnaEkran"), 'kullanici_bilgisi_guncelle'):
@@ -4711,13 +6039,53 @@ class SikayetUygulamasi(ctk.CTk):
         if hasattr(self.frames.get("Ayarlar"), 'kullanici_gorunumu_guncelle'):
             self.frames["Ayarlar"].kullanici_gorunumu_guncelle()
         
-    def show_frame(self, page_name):
-        frame = self.frames.get(page_name)
-        if frame:
-            frame.tkraise()
-            if page_name == "SikayetArsivi":
-                frame.listeyi_yenile()
+    def show_frame(self, page_name, transition="slide"):
+        """
+        Sayfa geçişini animasyonlu yap.
+        transition: 'slide' (varsayılan) veya 'fade' (henüz tam değil)
+        """
+        new_frame = self.frames.get(page_name)
+        if not new_frame:
+            return
             
+        # Eğer zaten bu sayfadaysak bir şey yapma
+        # (Bunu kontrol etmek zor olabilir çünkü hepsi place ile duruyor, 
+        # ama en üsttekini kontrol edebiliriz eğer bir değişken tutarsak. Şimdilik geçelim)
+
+        if page_name == "SikayetArsivi":
+            try: new_frame.listeyi_yenile()
+            except: pass
+        
+        # --- Slide Animasyonu ---
+        # 1. Yeni frame'i ekranın sağına koy (x=1.0)
+        # 2. Yavaşça içeri kaydır (x=0.0)
+        # 3. Eski frame bu sırada yerinde durabilir veya sola kayabilir
+        
+        # Önceki görünen frame'i bul (Basitçe en üstte olanı varsayalım veya hepsini gizleyelim)
+        # Daha güvenli yol: Yeni frame'i en üste koy, ama sağda başlasın
+        
+        new_frame.lift()
+        new_frame.place(relx=1.0, rely=0.0, relwidth=1.0, relheight=1.0)
+        
+        # Animasyon döngüsü
+        def slide_in(step=0):
+            if step > 20:
+                new_frame.place(relx=0.0, rely=0.0) # Tam oturt
+                return
+            
+            # Ease out fonksiyonu ile progress
+            progress = step / 20
+            # Basit ease-out: t * (2 - t)
+            ease = progress * (2 - progress) 
+            
+            # x: 1.0 -> 0.0
+            current_x = 1.0 - ease
+            
+            new_frame.place(relx=current_x, rely=0.0)
+            self.after(10, lambda: slide_in(step + 1))
+            
+        slide_in()
+        
     def yeni_sikayet_ac(self, duzenlenecek_kayit=None):
         """Yeni şikayet veya düzenleme ekranını aç"""
         # Mevcut YeniSikayet frame'i varsa sil
@@ -4734,8 +6102,27 @@ class SikayetUygulamasi(ctk.CTk):
             controller=self
         )
         self.frames["YeniSikayet"] = frame
-        frame.grid(row=0, column=0, sticky="nsew")
+        
+        # Animasyonlu açılış
+        frame.place(relx=0.0, rely=1.0, relwidth=1.0, relheight=1.0) # Alttan gelsin (Bottom Sheet gibi)
         frame.tkraise()
+        
+        def slide_up(step=0):
+            if step > 20: frame.place(relx=0.0, rely=0.0); return
+            progress = step / 20
+            ease = progress * (2 - progress)
+            current_y = 1.0 - ease
+            frame.place(relx=0.0, rely=current_y)
+            self.after(10, lambda: slide_up(step + 1))
+            
+        slide_up()
+        
+    def show_frame_direct(self, page_name):
+        """Animasyonsuz direkt geçiş (İlk açılış vb.)"""
+        frame = self.frames.get(page_name)
+        if frame:
+            frame.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
+            frame.tkraise()
     
     def sikayet_detay_ac(self, kayit):
         """Şikayet detay ekranını aç"""
@@ -4751,8 +6138,27 @@ class SikayetUygulamasi(ctk.CTk):
             controller=self
         )
         self.frames["SikayetDetay"] = frame
-        frame.grid(row=0, column=0, sticky="nsew")
+        
+        # Yandan açılış (Slide Left)
+        frame.place(relx=1.0, rely=0.0, relwidth=1.0, relheight=1.0)
         frame.tkraise()
+        
+        def slide_in(step=0):
+            if not frame.winfo_exists(): return
+            if step > 20: 
+                try: frame.place(relx=0.0, rely=0.0)
+                except: pass
+                return
+            progress = step / 20
+            # Ease out
+            ease = progress * (2 - progress)
+            current_x = 1.0 - ease
+            try:
+                frame.place(relx=current_x, rely=0.0)
+                self.after(10, lambda: slide_in(step + 1))
+            except: pass
+        
+        slide_in()
     
     def cikis_yap(self):
         # Çıkış işlemini logla
@@ -4783,6 +6189,35 @@ class SikayetUygulamasi(ctk.CTk):
                     print(f"Otomatik yedek alındı: {sonuc}")
         except Exception as e:
             print(f"Otomatik yedek hatası: {e}")
+    
+    def setup_keyboard_shortcuts(self):
+        """Klavye kısayollarını ayarla"""
+        # Ctrl+N - Yeni Şikayet
+        self.bind("<Control-n>", lambda e: self.yeni_sikayet_ac() if self.aktif_kullanici else None)
+        self.bind("<Control-N>", lambda e: self.yeni_sikayet_ac() if self.aktif_kullanici else None)
+        
+        # F5 - Yenile
+        self.bind("<F5>", lambda e: self.refresh_current_page())
+        
+        # Esc - Geri/Kapat
+        self.bind("<Escape>", lambda e: self.handle_escape())
+    
+    def refresh_current_page(self):
+        """Aktif sayfayı yenile"""
+        if "SikayetArsivi" in self.frames:
+            try:
+                self.frames["SikayetArsivi"].listeyi_yenile()
+            except:
+                pass
+    
+    def handle_escape(self):
+        """Escape tuşu işleyici"""
+        # Eğer YeniSikayet ekranındaysak, geri dön
+        if "YeniSikayet" in self.frames:
+            try:
+                self.frames["YeniSikayet"].geri_don()
+            except:
+                pass
 
 
 if __name__ == "__main__":

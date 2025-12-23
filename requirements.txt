@@ -1,3 +1,13 @@
-flask
 psycopg2-binary
-gunicorn
+flask
+flask-cors
+Pillow
+customtkinter
+reportlab
+google-generativeai
+matplotlib
+openpyxl
+twilio
+pandas
+python-dotenv
+tkcalendar
