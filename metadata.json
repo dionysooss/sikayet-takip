@@ -1,0 +1,8 @@
+{
+  "name": "Isparta Petrol CRM",
+  "description": "Complaint Tracking System for Isparta Petrol Turizm with AI-powered analysis and image editing capabilities.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
