@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../types';
 import { firestoreService } from '../services/firestoreService';
 import PhoneInput from './PhoneInput';
+import { validatePassword, validateEmail } from '../utils/security';
 
 interface UserManagementProps {
   currentUser: User;
@@ -95,15 +96,36 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validations
-    if (!editingUser && (!formData.password || formData.password.length < 6)) {
-      alert('Yeni kullanıcılar için en az 6 karakterli şifre zorunludur.');
+    // Email validation
+    if (formData.email && !validateEmail(formData.email)) {
+      alert('Geçersiz email adresi.');
       return;
     }
-    if (editingUser && formData.password && formData.password.length < 6) {
-      alert('Şifre en az 6 karakter olmalıdır.');
-      return;
+
+    // Password validation for new users
+    if (!editingUser) {
+      if (!formData.password) {
+        alert('Yeni kullanıcılar için şifre zorunludur.');
+        return;
+      }
+
+      const passwordCheck = validatePassword(formData.password);
+      if (!passwordCheck.isValid) {
+        alert('Şifre güvenlik kuralları:\n' + passwordCheck.errors.join('\n'));
+        return;
+      }
     }
+
+    // Password validation for existing users (if changing)
+    if (editingUser && formData.password) {
+      const passwordCheck = validatePassword(formData.password);
+      if (!passwordCheck.isValid) {
+        alert('Şifre güvenlik kuralları:\n' + passwordCheck.errors.join('\n'));
+        return;
+      }
+    }
+
+    // Phone validation
     if (!formData.phoneRaw || formData.phoneRaw.length < 5) {
       alert('Lütfen geçerli bir telefon numarası giriniz.');
       return;
@@ -224,7 +246,16 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Şifre {editingUser && '(Değişmeyecekse boş bırakın)'}</label>
-                  <input type="password" value={formData.password} onChange={e => setFormData({ ...formData, password: e.target.value })} className="w-full bg-black/20 border border-gray-700 rounded p-2 text-white focus:border-brand-blue focus:outline-none" placeholder={editingUser ? '******' : 'En az 6 karakter'} />
+                  <input
+                    type="password"
+                    value={formData.password}
+                    onChange={e => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full bg-black/20 border border-gray-700 rounded p-2 text-white focus:border-brand-blue focus:outline-none"
+                    placeholder={editingUser ? '******' : 'Min 8 karakter, büyük/küçük harf, rakam'}
+                  />
+                  {!editingUser && (
+                    <p className="text-xs text-gray-500 mt-1">En az 8 karakter, büyük harf, küçük harf ve rakam içermelidir</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Rol</label>
@@ -246,8 +277,15 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm text-gray-400 mb-1">E-posta</label>
-                  <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="w-full bg-black/20 border border-gray-700 rounded p-2 text-white focus:border-brand-blue focus:outline-none" />
+                  <label className="block text-sm text-gray-400 mb-1">E-posta {!editingUser && <span className="text-red-400">*</span>}</label>
+                  <input
+                    type="email"
+                    required={!editingUser}
+                    value={formData.email}
+                    onChange={e => setFormData({ ...formData, email: e.target.value })}
+                    className="w-full bg-black/20 border border-gray-700 rounded p-2 text-white focus:border-brand-blue focus:outline-none"
+                    placeholder="ornek@ispartapetrol.com"
+                  />
                 </div>
                 <div>
                   <label className="block text-sm text-gray-400 mb-1">Şube</label>

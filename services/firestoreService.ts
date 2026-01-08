@@ -16,6 +16,7 @@ import {
 import { db } from './firebaseConfig';
 import { Complaint, ComplaintStatus, LogEntry, User, ComplaintCategory, UserRole } from '../types';
 import { MOCK_USERS } from '../constants';
+import bcrypt from 'bcryptjs';
 
 // Collection references
 const usersCollection = collection(db, 'users');
@@ -82,6 +83,12 @@ export const firestoreService = {
 
     addUser: async (newUser: User, performedBy: User) => {
         try {
+            // Şifreyi hash'le
+            if (newUser.password) {
+                const salt = await bcrypt.genSalt(10);
+                newUser.password = await bcrypt.hash(newUser.password, salt);
+            }
+
             await setDoc(doc(db, 'users', newUser.id), newUser);
             await firestoreService.logAction(performedBy, 'KULLANICI_EKLEME', newUser.username);
         } catch (error) {
@@ -97,9 +104,17 @@ export const firestoreService = {
 
             if (userDoc.exists()) {
                 const existingUser = userDoc.data() as User;
+
+                // Eğer şifre değiştiriliyorsa hash'le
+                let passwordToSave = existingUser.password;
+                if (updatedUser.password && updatedUser.password !== existingUser.password) {
+                    const salt = await bcrypt.genSalt(10);
+                    passwordToSave = await bcrypt.hash(updatedUser.password, salt);
+                }
+
                 const dataToUpdate = {
                     ...updatedUser,
-                    password: updatedUser.password || existingUser.password
+                    password: passwordToSave
                 };
                 await updateDoc(userRef, dataToUpdate as any);
             }
@@ -140,13 +155,48 @@ export const firestoreService = {
     login: async (username: string, password?: string): Promise<User | null> => {
         try {
             const users = await firestoreService.getUsers();
-            return users.find(u =>
-                u.username.toLowerCase() === username.toLowerCase() &&
-                u.password === password
-            ) || null;
+            const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+
+            if (!user || !password) {
+                return null;
+            }
+
+            // Şifre hash'ini kontrol et
+            const isPasswordValid = await bcrypt.compare(password, user.password || '');
+
+            if (isPasswordValid) {
+                return user;
+            }
+
+            return null;
         } catch (error) {
             console.error('Error during login:', error);
             return null;
+        }
+    },
+
+    // Yeni yardımcı fonksiyonlar
+    getUserById: async (id: string): Promise<User | null> => {
+        try {
+            const userRef = doc(db, 'users', id);
+            const userDoc = await getDoc(userRef);
+
+            if (userDoc.exists()) {
+                return userDoc.data() as User;
+            }
+            return null;
+        } catch (error) {
+            console.error('Error getting user by ID:', error);
+            return null;
+        }
+    },
+
+    createUserDocument: async (user: User): Promise<void> => {
+        try {
+            await setDoc(doc(db, 'users', user.id), user);
+        } catch (error) {
+            console.error('Error creating user document:', error);
+            throw error;
         }
     },
 

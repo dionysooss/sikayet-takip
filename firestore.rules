@@ -1,0 +1,34 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // GEÇICI ÇÖZÜM: Custom auth kullanıldığı için tüm erişime izin ver
+    // NOT: Production'da Firebase Authentication kullanılmalı!
+    
+    // Users collection - Herkes okuyabilir (login için gerekli)
+    match /users/{userId} {
+      // Herkes okuyabilir (login kontrolü için)
+      allow read: if true;
+      
+      // Herkes yazabilir (şimdilik - güvenlik riski!)
+      allow create, update, delete: if true;
+    }
+    
+    // Complaints collection
+    match /complaints/{complaintId} {
+      // Herkes okuyabilir ve yazabilir
+      allow read, write: if true;
+    }
+    
+    // Logs collection
+    match /logs/{logId} {
+      // Herkes okuyabilir ve yazabilir
+      allow read, write: if true;
+    }
+    
+    // Diğer tüm koleksiyonlar
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

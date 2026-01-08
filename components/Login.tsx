@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { firestoreService } from '../services/firestoreService';
 import { User } from '../types';
+import { checkRateLimit, resetRateLimit } from '../utils/security';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -10,14 +11,66 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [blockedUntil, setBlockedUntil] = useState<Date | null>(null);
+
+  // Bloke süresini kontrol et
+  useEffect(() => {
+    if (blockedUntil) {
+      const timer = setInterval(() => {
+        if (new Date() > blockedUntil) {
+          setBlockedUntil(null);
+          setError('');
+        }
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [blockedUntil]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const user = await firestoreService.login(username, password);
-    if (user) {
-      onLogin(user);
-    } else {
-      setError('Kullanıcı adı veya şifre hatalı.');
+    setError('');
+
+    // Boş alan kontrolü
+    if (!username.trim() || !password.trim()) {
+      setError('Kullanıcı adı ve şifre gereklidir');
+      return;
+    }
+
+    // Rate limiting kontrolü
+    const rateLimitCheck = checkRateLimit(username.toLowerCase(), 5, 15 * 60 * 1000, 5 * 60 * 1000);
+
+    if (!rateLimitCheck.allowed) {
+      const remainingTime = Math.ceil((rateLimitCheck.blockedUntil!.getTime() - Date.now()) / 1000 / 60);
+      setError(`Çok fazla başarısız deneme. ${remainingTime} dakika sonra tekrar deneyin.`);
+      setBlockedUntil(rateLimitCheck.blockedUntil!);
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const user = await firestoreService.login(username, password);
+
+      if (user) {
+        // Başarılı giriş - rate limit'i sıfırla
+        resetRateLimit(username.toLowerCase());
+        onLogin(user);
+      } else {
+        // Başarısız giriş
+        const remainingAttempts = rateLimitCheck.remainingAttempts || 0;
+
+        if (remainingAttempts > 0) {
+          setError(`Kullanıcı adı veya şifre hatalı. Kalan deneme hakkı: ${remainingAttempts}`);
+        } else {
+          setError('Kullanıcı adı veya şifre hatalı.');
+        }
+      }
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -39,8 +92,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full bg-white text-black border border-gray-300 rounded-lg p-3 focus:ring-4 focus:ring-blue-500/20 focus:border-brand-blue focus:outline-none transition-all"
+              disabled={isLoading || !!blockedUntil}
+              className="w-full bg-white text-black border border-gray-300 rounded-lg p-3 focus:ring-4 focus:ring-blue-500/20 focus:border-brand-blue focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               placeholder="Kullanıcı adınızı girin"
+              autoComplete="username"
             />
           </div>
 
@@ -50,22 +105,31 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-white text-black border border-gray-300 rounded-lg p-3 focus:ring-4 focus:ring-blue-500/20 focus:border-brand-blue focus:outline-none transition-all"
+              disabled={isLoading || !!blockedUntil}
+              className="w-full bg-white text-black border border-gray-300 rounded-lg p-3 focus:ring-4 focus:ring-blue-500/20 focus:border-brand-blue focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               placeholder="Şifrenizi girin"
+              autoComplete="current-password"
             />
           </div>
 
-          {error && <p className="text-red-400 text-sm text-center bg-red-900/10 p-2 rounded border border-red-900/20">{error}</p>}
+          {error && (
+            <div className="text-red-400 text-sm text-center bg-red-900/10 p-3 rounded border border-red-900/20">
+              {error}
+            </div>
+          )}
 
           <button
             type="submit"
-            className="w-full bg-brand-blue text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_25px_rgba(59,130,246,0.5)]"
+            disabled={isLoading || !!blockedUntil}
+            className="w-full bg-brand-blue text-white font-bold py-3 rounded-lg hover:bg-blue-600 transition-all shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:shadow-[0_0_25px_rgba(59,130,246,0.5)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Giriş Yap
+            {isLoading ? 'Giriş yapılıyor...' : blockedUntil ? 'Geçici olarak engellendi' : 'Giriş Yap'}
           </button>
         </form>
 
-
+        <div className="mt-6 text-center text-xs text-gray-500">
+          <p>🔒 Güvenli bağlantı ile korunmaktadır</p>
+        </div>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ import UserManagement from './components/UserManagement';
 import Profile from './components/Profile';
 import { User, Complaint, LogEntry, UserRole } from './types';
 import { firestoreService } from './services/firestoreService';
+import { migrateUserPasswords } from './utils/migration';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -37,6 +38,18 @@ const App: React.FC = () => {
   useEffect(() => {
     loadAllData();
   }, [loadAllData, page]);
+
+  // Şifre migration - sadece bir kez çalışır
+  useEffect(() => {
+    const runMigration = async () => {
+      try {
+        await migrateUserPasswords();
+      } catch (error) {
+        console.error('Migration error:', error);
+      }
+    };
+    runMigration();
+  }, []);
 
   // Seçili şikayet güncellemelerini takip et
   useEffect(() => {
