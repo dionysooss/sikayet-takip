@@ -11,7 +11,8 @@ import {
     limit,
     where,
     Timestamp,
-    setDoc
+    setDoc,
+    increment
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
 import { Complaint, ComplaintStatus, LogEntry, User, ComplaintCategory, UserRole } from '../types';
@@ -22,6 +23,7 @@ import bcrypt from 'bcryptjs';
 const usersCollection = collection(db, 'users');
 const complaintsCollection = collection(db, 'complaints');
 const logsCollection = collection(db, 'logs');
+const countersCollection = collection(db, 'counters');
 
 // Initialize default data in Firestore (run once)
 const initFirestoreData = async () => {
@@ -68,6 +70,64 @@ const initFirestoreData = async () => {
 
 // Call init on module load
 initFirestoreData();
+
+// Atomic counter functions
+const getNextComplaintNumber = async (year: number): Promise<string> => {
+    try {
+        const counterRef = doc(countersCollection, `complaints-${year}`);
+        const counterDoc = await getDoc(counterRef);
+
+        // Initialize counter if it doesn't exist
+        if (!counterDoc.exists()) {
+            await initializeYearCounter(year);
+        }
+
+        // Atomically increment the counter
+        await updateDoc(counterRef, {
+            count: increment(1)
+        });
+
+        // Get the updated count
+        const updated = await getDoc(counterRef);
+        const count = updated.data()?.count || 1;
+
+        return `${year}/${count.toString().padStart(4, '0')}`;
+    } catch (error) {
+        console.error('Error generating complaint number:', error);
+        throw error;
+    }
+};
+
+const initializeYearCounter = async (year: number): Promise<void> => {
+    try {
+        const counterRef = doc(countersCollection, `complaints-${year}`);
+
+        // Get all complaints for this year
+        const allComplaints = await firestoreService.getComplaints();
+        const yearComplaints = allComplaints.filter(c =>
+            c.ticketNumber?.startsWith(year.toString())
+        );
+
+        // Find the highest number
+        let maxNumber = 0;
+        yearComplaints.forEach(c => {
+            const match = c.ticketNumber?.match(/\/(\d+)$/);
+            if (match) {
+                const num = parseInt(match[1], 10);
+                if (num > maxNumber) {
+                    maxNumber = num;
+                }
+            }
+        });
+
+        // Set the counter to the highest number found
+        await setDoc(counterRef, { count: maxNumber });
+        console.log(`Initialized counter for year ${year} with count ${maxNumber}`);
+    } catch (error) {
+        console.error('Error initializing year counter:', error);
+        throw error;
+    }
+};
 
 export const firestoreService = {
     // User operations
@@ -236,11 +296,9 @@ export const firestoreService = {
     saveComplaint: async (complaint: Complaint, user: User, isNew: boolean) => {
         try {
             if (isNew) {
-                // Generate ticket number
+                // Generate ticket number using atomic counter
                 const year = new Date().getFullYear();
-                const allComplaints = await firestoreService.getComplaints();
-                const lastInYear = allComplaints.filter(c => c.ticketNumber?.startsWith(year.toString()));
-                complaint.ticketNumber = `${year}/${(lastInYear.length + 1).toString().padStart(4, '0')}`;
+                complaint.ticketNumber = await getNextComplaintNumber(year);
 
                 // Add new complaint
                 await setDoc(doc(db, 'complaints', complaint.id), complaint);

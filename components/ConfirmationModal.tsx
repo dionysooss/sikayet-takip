@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface ConfirmationModalProps {
     isOpen: boolean;
@@ -21,6 +21,20 @@ const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
     cancelLabel = "İptal",
     isProcessing = false,
 }) => {
+    // Handle ESC key to close modal
+    useEffect(() => {
+        if (!isOpen) return;
+
+        const handleEscape = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && !isProcessing) {
+                onClose();
+            }
+        };
+
+        document.addEventListener('keydown', handleEscape);
+        return () => document.removeEventListener('keydown', handleEscape);
+    }, [isOpen, isProcessing, onClose]);
+
     if (!isOpen) return null;
 
     return (

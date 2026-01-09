@@ -3,6 +3,7 @@ import { User, UserRole } from '../types';
 import { firestoreService } from '../services/firestoreService';
 import PhoneInput from './PhoneInput';
 import { validatePassword, validateEmail } from '../utils/security';
+import ConfirmationModal from './ConfirmationModal';
 
 interface UserManagementProps {
   currentUser: User;
@@ -12,6 +13,11 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
   const [users, setUsers] = useState<User[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+
+  // Delete confirmation modal state
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState({
@@ -66,21 +72,29 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    console.log('Delete button clicked for user ID:', id);
-    if (confirm('Bu kullanıcıyı silmek istediğinize emin misiniz?')) {
-      console.log('User confirmed deletion');
-      try {
-        console.log('Calling firestoreService.deleteUser...');
-        await firestoreService.deleteUser(id, currentUser);
-        console.log('Delete successful, reloading users...');
-        loadUsers();
-      } catch (e: any) {
-        console.error('Delete error:', e);
-        alert(e.message);
-      }
-    } else {
-      console.log('User cancelled deletion');
+  const handleDelete = (user: User) => {
+    console.log('Delete button clicked for user:', user.fullName);
+    setUserToDelete(user);
+    setIsDeleteModalOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!userToDelete) return;
+
+    console.log('User confirmed deletion');
+    setIsDeleting(true);
+    try {
+      console.log('Calling firestoreService.deleteUser...');
+      await firestoreService.deleteUser(userToDelete.id, currentUser);
+      console.log('Delete successful, reloading users...');
+      setIsDeleteModalOpen(false);
+      setUserToDelete(null);
+      loadUsers();
+    } catch (e: any) {
+      console.error('Delete error:', e);
+      alert(e.message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -209,7 +223,7 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
                     </button>
                     {u.id !== currentUser.id && (
                       <button
-                        onClick={() => handleDelete(u.id)}
+                        onClick={() => handleDelete(u)}
                         className="text-red-400 hover:text-white"
                       >
                         Sil
@@ -301,6 +315,21 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setUserToDelete(null);
+        }}
+        onConfirm={confirmDelete}
+        title="Kullanıcıyı Sil"
+        message={`${userToDelete?.fullName} kullanıcısını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz.`}
+        confirmLabel="Evet, Sil"
+        cancelLabel="İptal"
+        isProcessing={isDeleting}
+      />
     </div>
   );
 };
