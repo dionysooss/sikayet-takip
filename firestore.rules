@@ -2,33 +2,77 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // GEÇICI ÇÖZÜM: Custom auth kullanıldığı için tüm erişime izin ver
-    // NOT: Production'da Firebase Authentication kullanılmalı!
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
     
-    // Users collection - Herkes okuyabilir (login için gerekli)
+    // Helper function to get user role from Firestore
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    // Helper function to check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'ADMIN';
+    }
+    
+    // Helper function to check if user is manager or admin
+    function isManagerOrAdmin() {
+      return isAuthenticated() && (getUserRole() == 'ADMIN' || getUserRole() == 'MANAGER');
+    }
+    
+    // Users collection
     match /users/{userId} {
-      // Herkes okuyabilir (login kontrolü için)
-      allow read: if true;
+      // Anyone authenticated can read user data (needed for app functionality)
+      allow read: if isAuthenticated();
       
-      // Herkes yazabilir (şimdilik - güvenlik riski!)
-      allow create, update, delete: if true;
+      // Only the user themselves can update their own profile
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      
+      // Only admin and manager can create or delete users
+      allow create, delete: if isManagerOrAdmin();
     }
     
     // Complaints collection
     match /complaints/{complaintId} {
-      // Herkes okuyabilir ve yazabilir
-      allow read, write: if true;
+      // Only authenticated users can read complaints
+      allow read: if isAuthenticated();
+      
+      // Only authenticated users can create complaints
+      allow create: if isAuthenticated();
+      
+      // Only authenticated users can update complaints
+      allow update: if isAuthenticated();
+      
+      // Only admin and manager can delete complaints
+      allow delete: if isManagerOrAdmin();
     }
     
     // Logs collection
     match /logs/{logId} {
-      // Herkes okuyabilir ve yazabilir
-      allow read, write: if true;
+      // Only authenticated users can read logs
+      allow read: if isAuthenticated();
+      
+      // Only the system can write logs (via server-side or authenticated users)
+      allow create: if isAuthenticated();
+      
+      // No one can update or delete logs
+      allow update, delete: if false;
     }
     
-    // Diğer tüm koleksiyonlar
+    // Counters collection
+    match /counters/{counterId} {
+      // Only authenticated users can read counters
+      allow read: if isAuthenticated();
+      
+      // Only authenticated users can write counters (for ticket numbering)
+      allow write: if isAuthenticated();
+    }
+    
+    // Deny all other collections by default
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

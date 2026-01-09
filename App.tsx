@@ -10,16 +10,38 @@ import UserManagement from './components/UserManagement';
 import Profile from './components/Profile';
 import { User, Complaint, LogEntry, UserRole } from './types';
 import { firestoreService } from './services/firestoreService';
+import { authService } from './services/authService';
 import { migrateUserPasswords } from './utils/migration';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [page, setPage] = useState('home');
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
 
   // Complaints state, refreshed explicitly
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+
+  // Firebase Auth state listener - auto-login
+  useEffect(() => {
+    const unsubscribe = authService.onAuthStateChanged(async (firebaseUser) => {
+      if (firebaseUser) {
+        // User is signed in, get user data from Firestore
+        const userData = await authService.getUserData(firebaseUser.uid);
+        if (userData) {
+          setUser(userData);
+        }
+      } else {
+        // User is signed out
+        setUser(null);
+      }
+      setIsAuthLoading(false);
+    });
+
+    // Cleanup subscription on unmount
+    return () => unsubscribe();
+  }, []);
 
   // Veri yükleme fonksiyonu - Firestore'dan async olarak
   const loadAllData = useCallback(async () => {
@@ -73,10 +95,15 @@ const App: React.FC = () => {
     setPage('home');
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    setPage('login');
-    setSelectedComplaint(null);
+  const handleLogout = async () => {
+    try {
+      await authService.signOut();
+      setUser(null);
+      setPage('login');
+      setSelectedComplaint(null);
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   const handleDeleteComplaint = async (id: string) => {
@@ -107,6 +134,15 @@ const App: React.FC = () => {
       alert("Silme işlemi başarısız oldu veya yetkiniz yok.");
     }
   };
+
+  // Show loading state while checking auth
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-brand-dark">
+        <div className="text-white text-xl">Yükleniyor...</div>
+      </div>
+    );
+  }
 
   if (!user) return <Login onLogin={handleLogin} />;
 
