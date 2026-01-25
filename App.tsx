@@ -114,6 +114,11 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
+    // Logout logunu kaydet (user hala mevcut)
+    if (user) {
+      await firestoreService.logAction(user, 'LOGOUT', 'Sistemden çıkış yapıldı');
+    }
+
     const { getAuth, signOut } = await import('firebase/auth');
     const auth = getAuth();
     await signOut(auth);

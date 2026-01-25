@@ -25,6 +25,18 @@ const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBa
   const canManage = true; // DeleteButton will handle specific role check
   const canEditDetails = true;
 
+  // Şikayet görüntüleme logunu kaydet
+  React.useEffect(() => {
+    const logView = async () => {
+      await firestoreService.logAction(
+        user,
+        'GORUNTULEME',
+        `Şikayet ${complaint.ticketNumber} görüntülendi`
+      );
+    };
+    logView();
+  }, [complaint.id]); // complaint.id değiştiğinde tekrar logla
+
   const handleStatusChange = async (status: string) => {
     await firestoreService.updateStatus(complaint.id, status as ComplaintStatus, user);
     onUpdate();

@@ -3,6 +3,7 @@ import { getFirestore, collection, query, where, getDocs, doc, updateDoc } from 
 import { User } from '../types';
 import { checkRateLimit, resetRateLimit } from '../utils/security';
 import { verifyPassword, saveSession } from '../utils/auth';
+import { firestoreService } from '../services/firestoreService';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -116,7 +117,10 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       // 6. Rate limit'i sıfırla
       resetRateLimit(username.toLowerCase());
 
-      // 7. Kullanıcıyı giriş yaptır
+      // 7. Login logunu kaydet
+      await firestoreService.logAction(user, 'LOGIN', `Sisteme giriş yapıldı (IP: ${window.location.hostname})`);
+
+      // 8. Kullanıcıyı giriş yaptır
       onLogin(user);
 
     } catch (err: any) {

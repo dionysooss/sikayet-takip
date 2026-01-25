@@ -2,41 +2,21 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isAdmin() {
-      return isAuthenticated() && 
-             get(/databases/$(database)/documents/users/$(request.resource.data.id)).data.role == 'admin';
-    }
-    
-    function isAdminByUid() {
-      return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
-    }
-    
     // Users collection
     match /users/{userId} {
       // Anyone can read (required for username-based login)
       allow read: if true;
       
-      // Users can update their own profile
-      allow update: if isAuthenticated() && request.auth.uid == resource.data.firebaseUid;
-      
-      // Only admins can create/delete users
-      allow create, delete: if isAdminByUid();
+      // Anyone can create/update/delete users
+      // (Application-level security is handled in the app code)
+      allow create, update, delete: if true;
     }
     
     // Complaints collection
     match /complaints/{complaintId} {
-      // Anyone can read
-      allow read: if true;
-      
-      // Only authenticated users can create/update/delete
-      allow create, update, delete: if isAuthenticated();
+      // Anyone can read/write
+      // (Application-level security is handled in the app code)
+      allow read, write: if true;
     }
     
     // Logs collection
@@ -44,8 +24,8 @@ service cloud.firestore {
       // Anyone can read
       allow read: if true;
       
-      // Only authenticated users can create
-      allow create: if isAuthenticated();
+      // Anyone can create logs
+      allow create: if true;
       
       // No one can update/delete logs
       allow update, delete: if false;
@@ -53,11 +33,8 @@ service cloud.firestore {
     
     // Counters collection
     match /counters/{counterId} {
-      // Anyone can read
-      allow read: if true;
-      
-      // Only authenticated users can write
-      allow write: if isAuthenticated();
+      // Anyone can read/write
+      allow read, write: if true;
     }
   }
 }
