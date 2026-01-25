@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { authService } from '../services/authService';
+import { getFirestore, collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
 import { User } from '../types';
 import { checkRateLimit, resetRateLimit } from '../utils/security';
+import { verifyPassword, saveSession } from '../utils/auth';
 
 interface LoginProps {
   onLogin: (user: User) => void;
 }
 
 const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,13 +33,13 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
 
     // Boş alan kontrolü
-    if (!email.trim() || !password.trim()) {
-      setError('Email ve şifre gereklidir');
+    if (!username.trim() || !password.trim()) {
+      setError('Kullanıcı adı ve şifre gereklidir');
       return;
     }
 
     // Rate limiting kontrolü
-    const rateLimitCheck = checkRateLimit(email.toLowerCase(), 5, 15 * 60 * 1000, 5 * 60 * 1000);
+    const rateLimitCheck = checkRateLimit(username.toLowerCase(), 5, 15 * 60 * 1000, 5 * 60 * 1000);
 
     if (!rateLimitCheck.allowed) {
       const remainingTime = Math.ceil((rateLimitCheck.blockedUntil!.getTime() - Date.now()) / 1000 / 60);
@@ -50,25 +51,77 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setIsLoading(true);
 
     try {
-      const user = await authService.signIn(email, password);
+      const db = getFirestore();
 
-      if (user) {
-        // Başarılı giriş - rate limit'i sıfırla
-        resetRateLimit(email.toLowerCase());
-        onLogin(user);
-      } else {
-        // Başarısız giriş
+      // 1. Kullanıcıyı kullanıcı adı ile bul
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('username', '==', username.toLowerCase()));
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        // Kullanıcı bulunamadı
         const remainingAttempts = rateLimitCheck.remainingAttempts || 0;
-
         if (remainingAttempts > 0) {
-          setError(`Email veya şifre hatalı. Kalan deneme hakkı: ${remainingAttempts}`);
+          setError(`Kullanıcı adı veya şifre hatalı. Kalan deneme hakkı: ${remainingAttempts}`);
         } else {
-          setError('Email veya şifre hatalı.');
+          setError('Kullanıcı adı veya şifre hatalı.');
         }
+        setIsLoading(false);
+        return;
       }
+
+      const userDoc = querySnapshot.docs[0];
+      const userData = userDoc.data();
+
+      // 2. Firebase Auth ile giriş yap (gizli email kullanarak)
+      const { getAuth, signInWithEmailAndPassword } = await import('firebase/auth');
+      const auth = getAuth();
+
+      // Email otomatik oluştur (kullanıcı görmez)
+      const email = userData.email || `${userData.username}@ispartapetrol.internal`;
+
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (authError: any) {
+        // Firebase Auth hatası
+        const remainingAttempts = rateLimitCheck.remainingAttempts || 0;
+        if (remainingAttempts > 0) {
+          setError(`Kullanıcı adı veya şifre hatalı. Kalan deneme hakkı: ${remainingAttempts}`);
+        } else {
+          setError('Kullanıcı adı veya şifre hatalı.');
+        }
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Başarılı giriş - User objesi oluştur
+      const user: User = {
+        id: userDoc.id,
+        username: userData.username,
+        fullName: userData.fullName,
+        role: userData.role,
+        branch: userData.branch || '',
+        phone: userData.phone || '',
+        photoURL: userData.photoURL || '',
+      };
+
+      // 4. Session'ı kaydet (localStorage)
+      saveSession(user, auth.currentUser!.uid);
+
+      // 5. Son giriş zamanını güncelle
+      await updateDoc(doc(db, 'users', userDoc.id), {
+        lastLogin: new Date()
+      });
+
+      // 6. Rate limit'i sıfırla
+      resetRateLimit(username.toLowerCase());
+
+      // 7. Kullanıcıyı giriş yaptır
+      onLogin(user);
+
     } catch (err: any) {
       console.error('Login error:', err);
-      setError(err.message || 'Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.');
+      setError('Giriş sırasında bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
       setIsLoading(false);
     }
@@ -87,15 +140,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Email</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Kullanıcı Adı</label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
               disabled={isLoading || !!blockedUntil}
               className="w-full bg-white text-black border border-gray-300 rounded-lg p-3 focus:ring-4 focus:ring-blue-500/20 focus:border-brand-blue focus:outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              placeholder="Email adresinizi girin"
-              autoComplete="email"
+              placeholder="Kullanıcı adınızı girin"
+              autoComplete="username"
             />
           </div>
 
@@ -128,7 +181,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </form>
 
         <div className="mt-6 text-center text-xs text-gray-500">
-          <p>🔒 Firebase Authentication ile güvenli bağlantı</p>
+          <p>🔒 Güvenli bağlantı</p>
         </div>
       </div>
     </div>

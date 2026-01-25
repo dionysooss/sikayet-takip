@@ -17,7 +17,6 @@ import {
 import { db } from './firebaseConfig';
 import { Complaint, ComplaintStatus, LogEntry, User, ComplaintCategory, UserRole } from '../types';
 import { MOCK_USERS } from '../constants';
-import bcrypt from 'bcryptjs';
 
 // Collection references
 const usersCollection = collection(db, 'users');
@@ -143,12 +142,7 @@ export const firestoreService = {
 
     addUser: async (newUser: User, performedBy: User) => {
         try {
-            // Şifreyi hash'le
-            if (newUser.password) {
-                const salt = await bcrypt.genSalt(10);
-                newUser.password = await bcrypt.hash(newUser.password, salt);
-            }
-
+            // Password should already be hashed by the caller
             await setDoc(doc(db, 'users', newUser.id), newUser);
             await firestoreService.logAction(performedBy, 'KULLANICI_EKLEME', newUser.username);
         } catch (error) {
@@ -163,20 +157,8 @@ export const firestoreService = {
             const userDoc = await getDoc(userRef);
 
             if (userDoc.exists()) {
-                const existingUser = userDoc.data() as User;
-
-                // Eğer şifre değiştiriliyorsa hash'le
-                let passwordToSave = existingUser.password;
-                if (updatedUser.password && updatedUser.password !== existingUser.password) {
-                    const salt = await bcrypt.genSalt(10);
-                    passwordToSave = await bcrypt.hash(updatedUser.password, salt);
-                }
-
-                const dataToUpdate = {
-                    ...updatedUser,
-                    password: passwordToSave
-                };
-                await updateDoc(userRef, dataToUpdate as any);
+                // Password should already be hashed by the caller if changed
+                await updateDoc(userRef, updatedUser as any);
             }
         } catch (error) {
             console.error('Error updating user:', error);
@@ -212,27 +194,11 @@ export const firestoreService = {
         }
     },
 
+    // Login is now handled by Login component with Web Crypto API
+    // This method is deprecated and should not be used
     login: async (username: string, password?: string): Promise<User | null> => {
-        try {
-            const users = await firestoreService.getUsers();
-            const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
-
-            if (!user || !password) {
-                return null;
-            }
-
-            // Şifre hash'ini kontrol et
-            const isPasswordValid = await bcrypt.compare(password, user.password || '');
-
-            if (isPasswordValid) {
-                return user;
-            }
-
-            return null;
-        } catch (error) {
-            console.error('Error during login:', error);
-            return null;
-        }
+        console.warn('firestoreService.login is deprecated. Use Login component instead.');
+        return null;
     },
 
     // Yeni yardımcı fonksiyonlar
@@ -320,12 +286,6 @@ export const firestoreService = {
 
     deleteComplaint: async (id: string, performedBy: User): Promise<boolean> => {
         try {
-            // Permission check
-            if (performedBy.role !== UserRole.ADMIN && performedBy.role !== UserRole.MANAGER) {
-                console.error('Unauthorized delete attempt:', performedBy.username);
-                return false;
-            }
-
             const complaintRef = doc(db, 'complaints', id);
             const complaintDoc = await getDoc(complaintRef);
 
@@ -335,6 +295,17 @@ export const firestoreService = {
             }
 
             const target = complaintDoc.data() as Complaint;
+
+            // Permission check: Admin/Manager can delete any complaint
+            // Regular users can only delete their own complaints
+            const isAdminOrManager = performedBy.role === UserRole.ADMIN || performedBy.role === UserRole.MANAGER;
+            const isOwner = target.createdBy === performedBy.id;
+
+            if (!isAdminOrManager && !isOwner) {
+                console.error('Unauthorized delete attempt:', performedBy.username, 'tried to delete complaint created by', target.createdBy);
+                return false;
+            }
+
             await deleteDoc(complaintRef);
             await firestoreService.logAction(performedBy, 'SILME', `Bilet No: ${target.ticketNumber}`);
             return true;

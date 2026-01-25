@@ -63,6 +63,7 @@ const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBa
           {/* MODÜLER SİLME BUTONU */}
           <DeleteButton
             user={user}
+            complaintOwnerId={complaint.createdBy}
             onDelete={onDelete}
             confirmMessage={`${complaint.ticketNumber} numaralı şikayeti silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!`}
             label="Şikayeti Sil"

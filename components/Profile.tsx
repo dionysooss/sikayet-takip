@@ -42,10 +42,13 @@ const Profile: React.FC<ProfileProps> = ({ user, onUpdate }) => {
         phoneRaw: formData.phoneRaw,
         phoneCountryCode: formData.phoneCountryCode,
         email: formData.email,
-        branch: formData.branch,
-        // Only update password if user typed a new one
-        password: formData.password || undefined
+        branch: formData.branch
       };
+
+      // Only include password if user wants to change it
+      if (formData.password) {
+        updatedUser.password = formData.password;
+      }
 
       await firestoreService.updateUser(updatedUser, user);
       onUpdate(updatedUser); // Update App state

@@ -16,7 +16,11 @@ export enum ComplaintCategory {
   SERVICE = 'Hizmet Kalitesi',
   TIMING = 'Sefer Saati/Gecikme',
   VEHICLE = 'Araç Durumu',
-  LUGGAGE = 'Bagaj Sorunları',
+  LUGGAGE = 'Bagaj Hasarı',
+  LUGGAGE_MIX = 'Bagaj Karışıklığı',
+  LOST_ITEM = 'Eşya Unutma',
+  DEPOSIT = 'Emanet',
+  PAYMENT_ERROR = 'Hatalı Çekim ve İade',
   PERSONNEL = 'Personel Davranışı',
   OTHER = 'Diğer'
 }
@@ -53,7 +57,7 @@ export interface Attachment {
 export interface Complaint {
   id: string;
   ticketNumber: string;
-  
+
   // Passenger Info
   passengerName: string;
   passengerPhone: string; // Formatted
@@ -75,7 +79,7 @@ export interface Complaint {
   category: ComplaintCategory;
   subcategory?: string;
   description: string;
-  
+
   // System Info
   status: ComplaintStatus;
   createdBy: string;

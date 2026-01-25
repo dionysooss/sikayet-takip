@@ -4,6 +4,7 @@ import { firestoreService } from '../services/firestoreService';
 import PhoneInput from './PhoneInput';
 import { validatePassword, validateEmail } from '../utils/security';
 import ConfirmationModal from './ConfirmationModal';
+import { hashPassword } from '../utils/auth';
 
 interface UserManagementProps {
   currentUser: User;
@@ -150,17 +151,25 @@ const UserManagement: React.FC<UserManagementProps> = ({ currentUser }) => {
         // Update
         const updatedUser: User = {
           ...editingUser,
-          ...formData,
-          // If password is empty string, service handles keeping old one
-          password: formData.password || undefined
+          ...formData
         };
+
+        // Hash password if it's being changed
+        if (formData.password) {
+          updatedUser.password = await hashPassword(formData.password);
+        } else {
+          // Don't include password field if not changing
+          delete updatedUser.password;
+        }
+
         await firestoreService.updateUser(updatedUser, currentUser);
       } else {
-        // Create
+        // Create - hash password
+        const hashedPassword = await hashPassword(formData.password);
         const newUser: User = {
           id: Date.now().toString(),
           ...formData,
-          password: formData.password // Required for new
+          password: hashedPassword
         };
         await firestoreService.addUser(newUser, currentUser);
       }

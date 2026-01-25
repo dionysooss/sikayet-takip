@@ -2,77 +2,62 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper function to check if user is authenticated
+    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
     
-    // Helper function to get user role from Firestore
-    function getUserRole() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
-    }
-    
-    // Helper function to check if user is admin
     function isAdmin() {
-      return isAuthenticated() && getUserRole() == 'ADMIN';
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.resource.data.id)).data.role == 'admin';
     }
     
-    // Helper function to check if user is manager or admin
-    function isManagerOrAdmin() {
-      return isAuthenticated() && (getUserRole() == 'ADMIN' || getUserRole() == 'MANAGER');
+    function isAdminByUid() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
     // Users collection
     match /users/{userId} {
-      // Anyone authenticated can read user data (needed for app functionality)
-      allow read: if isAuthenticated();
+      // Anyone can read (required for username-based login)
+      allow read: if true;
       
-      // Only the user themselves can update their own profile
-      allow update: if isAuthenticated() && request.auth.uid == userId;
+      // Users can update their own profile
+      allow update: if isAuthenticated() && request.auth.uid == resource.data.firebaseUid;
       
-      // Only admin and manager can create or delete users
-      allow create, delete: if isManagerOrAdmin();
+      // Only admins can create/delete users
+      allow create, delete: if isAdminByUid();
     }
     
     // Complaints collection
     match /complaints/{complaintId} {
-      // Only authenticated users can read complaints
-      allow read: if isAuthenticated();
+      // Anyone can read
+      allow read: if true;
       
-      // Only authenticated users can create complaints
-      allow create: if isAuthenticated();
-      
-      // Only authenticated users can update complaints
-      allow update: if isAuthenticated();
-      
-      // Only admin and manager can delete complaints
-      allow delete: if isManagerOrAdmin();
+      // Only authenticated users can create/update/delete
+      allow create, update, delete: if isAuthenticated();
     }
     
     // Logs collection
     match /logs/{logId} {
-      // Only authenticated users can read logs
-      allow read: if isAuthenticated();
+      // Anyone can read
+      allow read: if true;
       
-      // Only the system can write logs (via server-side or authenticated users)
+      // Only authenticated users can create
       allow create: if isAuthenticated();
       
-      // No one can update or delete logs
+      // No one can update/delete logs
       allow update, delete: if false;
     }
     
     // Counters collection
     match /counters/{counterId} {
-      // Only authenticated users can read counters
-      allow read: if isAuthenticated();
+      // Anyone can read
+      allow read: if true;
       
-      // Only authenticated users can write counters (for ticket numbering)
+      // Only authenticated users can write
       allow write: if isAuthenticated();
-    }
-    
-    // Deny all other collections by default
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }

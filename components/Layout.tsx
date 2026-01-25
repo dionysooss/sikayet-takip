@@ -46,7 +46,12 @@ const Layout: React.FC<LayoutProps> = ({ children, user, onLogout, currentPage, 
     },
   ];
 
-  const visibleMenuItems = menuItems.filter(item => item.roles.includes(user.role));
+  // user.role is a string, convert to lowercase for comparison
+  const userRoleString = user.role.toLowerCase();
+  const visibleMenuItems = menuItems.filter(item => {
+    // Check if user role matches any of the allowed roles
+    return item.roles.some(role => role.toLowerCase() === userRoleString);
+  });
 
   return (
     <div className="flex h-screen bg-brand-dark overflow-hidden">

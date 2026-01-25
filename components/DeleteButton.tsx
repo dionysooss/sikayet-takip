@@ -6,6 +6,7 @@ interface DeleteButtonProps {
   user: User;
   onDelete: () => void;
   confirmMessage: string;
+  complaintOwnerId?: string; // Şikayeti oluşturan kullanıcının ID'si
   label?: string;
   iconOnly?: boolean;
   className?: string;
@@ -15,6 +16,7 @@ const DeleteButton: React.FC<DeleteButtonProps> = ({
   user,
   onDelete,
   confirmMessage,
+  complaintOwnerId,
   label,
   iconOnly = false,
   className = ""
@@ -22,7 +24,11 @@ const DeleteButton: React.FC<DeleteButtonProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const canDelete = user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
+  // Admin/Manager tüm şikayetleri silebilir
+  // Normal kullanıcılar sadece kendi şikayetlerini silebilir
+  const isAdminOrManager = user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
+  const isOwner = complaintOwnerId ? user.id === complaintOwnerId : false;
+  const canDelete = isAdminOrManager || isOwner;
 
   if (!canDelete) return null;
 

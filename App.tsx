@@ -10,8 +10,7 @@ import UserManagement from './components/UserManagement';
 import Profile from './components/Profile';
 import { User, Complaint, LogEntry, UserRole } from './types';
 import { firestoreService } from './services/firestoreService';
-import { authService } from './services/authService';
-import { migrateUserPasswords } from './utils/migration';
+import { getSession, clearSession } from './utils/auth';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -23,24 +22,53 @@ const App: React.FC = () => {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
-  // Firebase Auth state listener - auto-login
+  // Firebase Auth state listener
   useEffect(() => {
-    const unsubscribe = authService.onAuthStateChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        // User is signed in, get user data from Firestore
-        const userData = await authService.getUserData(firebaseUser.uid);
-        if (userData) {
-          setUser(userData);
-        }
-      } else {
-        // User is signed out
-        setUser(null);
-      }
-      setIsAuthLoading(false);
-    });
+    const initAuth = async () => {
+      const { getAuth, onAuthStateChanged } = await import('firebase/auth');
+      const { getFirestore, doc, getDoc } = await import('firebase/firestore');
+      const auth = getAuth();
+      const db = getFirestore();
 
-    // Cleanup subscription on unmount
-    return () => unsubscribe();
+      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (firebaseUser) {
+          // Firebase user var, Firestore'dan bilgileri çek
+          try {
+            const usersRef = await import('firebase/firestore').then(m => m.collection(db, 'users'));
+            const q = await import('firebase/firestore').then(m =>
+              m.query(usersRef, m.where('firebaseUid', '==', firebaseUser.uid))
+            );
+            const querySnapshot = await import('firebase/firestore').then(m => m.getDocs(q));
+
+            if (!querySnapshot.empty) {
+              const userDoc = querySnapshot.docs[0];
+              const userData = userDoc.data();
+
+              const appUser: User = {
+                id: userDoc.id,
+                username: userData.username,
+                fullName: userData.fullName,
+                role: userData.role,
+                branch: userData.branch || '',
+                phone: userData.phone || '',
+                photoURL: userData.photoURL || '',
+              };
+
+              setUser(appUser);
+            }
+          } catch (error) {
+            console.error('Error loading user data:', error);
+          }
+        } else {
+          setUser(null);
+        }
+        setIsAuthLoading(false);
+      });
+
+      return unsubscribe;
+    };
+
+    initAuth();
   }, []);
 
   // Veri yükleme fonksiyonu - Firestore'dan async olarak
@@ -61,17 +89,7 @@ const App: React.FC = () => {
     loadAllData();
   }, [loadAllData, page]);
 
-  // Şifre migration - sadece bir kez çalışır
-  useEffect(() => {
-    const runMigration = async () => {
-      try {
-        await migrateUserPasswords();
-      } catch (error) {
-        console.error('Migration error:', error);
-      }
-    };
-    runMigration();
-  }, []);
+
 
   // Seçili şikayet güncellemelerini takip et
   useEffect(() => {
@@ -96,14 +114,13 @@ const App: React.FC = () => {
   };
 
   const handleLogout = async () => {
-    try {
-      await authService.signOut();
-      setUser(null);
-      setPage('login');
-      setSelectedComplaint(null);
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+    const { getAuth, signOut } = await import('firebase/auth');
+    const auth = getAuth();
+    await signOut(auth);
+    await clearSession();
+    setUser(null);
+    setPage('login');
+    setSelectedComplaint(null);
   };
 
   const handleDeleteComplaint = async (id: string) => {
@@ -162,6 +179,7 @@ const App: React.FC = () => {
     switch (page) {
       case 'home': return <Home user={user} onNavigate={setPage} />;
       case 'dashboard': return <Dashboard complaints={complaints} />;
+      case 'new': return <ComplaintForm user={user} onSuccess={() => { loadAllData(); setPage('list'); }} onCancel={() => setPage('home')} />;
       case 'list': return <ComplaintList complaints={complaints} user={user} onSelect={setSelectedComplaint} onDelete={handleDeleteComplaint} onUpdate={loadAllData} />;
       case 'users': return <UserManagement currentUser={user} />;
       case 'profile': return <Profile user={user} onUpdate={(u) => { setUser(u); loadAllData(); }} />;

@@ -194,6 +194,7 @@ const ComplaintList: React.FC<ComplaintListProps> = ({ complaints, user, onSelec
                       </button>
                       <DeleteButton
                         user={user}
+                        complaintOwnerId={c.createdBy}
                         onDelete={() => onDelete(c.id)}
                         confirmMessage={`${c.ticketNumber} numaralı kaydı silmek istediğinize emin misiniz?`}
                         iconOnly={true}
