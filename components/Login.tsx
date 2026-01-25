@@ -74,17 +74,16 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
       const userDoc = querySnapshot.docs[0];
       const userData = userDoc.data();
 
-      // 2. Firebase Auth ile giriş yap (gizli email kullanarak)
-      const { getAuth, signInWithEmailAndPassword } = await import('firebase/auth');
-      const auth = getAuth();
+      // 2. Şifre doğrulama (hash karşılaştırması)
+      if (!userData.password) {
+        setError('Kullanıcı şifresi bulunamadı. Lütfen yöneticinizle iletişime geçin.');
+        setIsLoading(false);
+        return;
+      }
 
-      // Email otomatik oluştur (kullanıcı görmez)
-      const email = userData.email || `${userData.username}@ispartapetrol.internal`;
+      const isPasswordValid = await verifyPassword(password, userData.password);
 
-      try {
-        await signInWithEmailAndPassword(auth, email, password);
-      } catch (authError: any) {
-        // Firebase Auth hatası
+      if (!isPasswordValid) {
         const remainingAttempts = rateLimitCheck.remainingAttempts || 0;
         if (remainingAttempts > 0) {
           setError(`Kullanıcı adı veya şifre hatalı. Kalan deneme hakkı: ${remainingAttempts}`);
@@ -103,11 +102,11 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         role: userData.role,
         branch: userData.branch || '',
         phone: userData.phone || '',
-        photoURL: userData.photoURL || '',
+        email: userData.email || '',
       };
 
       // 4. Session'ı kaydet (localStorage)
-      saveSession(user, auth.currentUser!.uid);
+      saveSession(user, userDoc.id);
 
       // 5. Son giriş zamanını güncelle
       await updateDoc(doc(db, 'users', userDoc.id), {

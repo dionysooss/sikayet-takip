@@ -119,9 +119,6 @@ const App: React.FC = () => {
       await firestoreService.logAction(user, 'LOGOUT', 'Sistemden çıkış yapıldı');
     }
 
-    const { getAuth, signOut } = await import('firebase/auth');
-    const auth = getAuth();
-    await signOut(auth);
     await clearSession();
     setUser(null);
     setPage('login');
