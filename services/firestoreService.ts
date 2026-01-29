@@ -15,7 +15,7 @@ import {
     increment
 } from 'firebase/firestore';
 import { db } from './firebaseConfig';
-import { Complaint, ComplaintStatus, LogEntry, User, ComplaintCategory, UserRole } from '../types';
+import { Complaint, ComplaintStatus, LogEntry, User, ComplaintCategory, UserRole, ActionType, ManagerAction } from '../types';
 import { MOCK_USERS } from '../constants';
 
 // Collection references
@@ -339,23 +339,72 @@ export const firestoreService = {
         }
     },
 
-    addNote: async (id: string, note: string, user: User) => {
+    addNote: async (id: string, note: string, actionType: ActionType, user: User) => {
         try {
             const complaintRef = doc(db, 'complaints', id);
             const complaintDoc = await getDoc(complaintRef);
 
             if (complaintDoc.exists()) {
                 const complaint = complaintDoc.data() as Complaint;
-                const managerNotes = complaint.managerNotes || [];
-                managerNotes.push(`[${new Date().toLocaleString()} - ${user.fullName}]: ${note}`);
+
+                // Use only the new detailed actions format
+                const managerActions = complaint.managerActions || [];
+                const newAction: ManagerAction = {
+                    id: Date.now().toString(),
+                    note,
+                    actionType,
+                    timestamp: new Date().toISOString(),
+                    userId: user.id,
+                    userName: user.fullName
+                };
+                managerActions.push(newAction);
 
                 await updateDoc(complaintRef, {
-                    managerNotes
+                    managerActions
                 });
             }
         } catch (error) {
             console.error('Error adding note:', error);
             throw error;
+        }
+    },
+
+    deleteNote: async (complaintId: string, actionId: string, user: User) => {
+        try {
+            // Permission check: Only admins/managers or the note creator can delete
+            const isAdminOrManager = user.role === UserRole.ADMIN || user.role === UserRole.MANAGER;
+
+            const complaintRef = doc(db, 'complaints', complaintId);
+            const complaintDoc = await getDoc(complaintRef);
+
+            if (complaintDoc.exists()) {
+                const complaint = complaintDoc.data() as Complaint;
+                const managerActions = complaint.managerActions || [];
+
+                // Find the action to delete
+                const actionToDelete = managerActions.find(a => a.id === actionId);
+
+                if (!actionToDelete) {
+                    throw new Error('Not bulunamadı.');
+                }
+
+                // Check if user has permission to delete this note
+                if (!isAdminOrManager && actionToDelete.userId !== user.id) {
+                    throw new Error('Bu notu silme yetkiniz yok.');
+                }
+
+                // Remove the action
+                const updatedActions = managerActions.filter(a => a.id !== actionId);
+
+                await updateDoc(complaintRef, {
+                    managerActions: updatedActions
+                });
+
+                await firestoreService.logAction(user, 'NOT_SILME', `Şikayet: ${complaint.ticketNumber}`);
+            }
+        } catch (error: any) {
+            console.error('Error deleting note:', error);
+            throw new Error(error.message || 'Not silinirken bir hata oluştu.');
         }
     },
 

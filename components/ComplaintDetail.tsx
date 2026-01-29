@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Complaint, ComplaintStatus, User } from '../types';
+import { Complaint, ComplaintStatus, User, ActionType } from '../types';
 import { firestoreService } from '../services/firestoreService';
 import ImageEditor from './ImageEditor';
 import AIChat from './AIChat';
@@ -18,6 +18,7 @@ interface ComplaintDetailProps {
 
 const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBack, onUpdate, onDelete }) => {
   const [newNote, setNewNote] = useState('');
+  const [actionType, setActionType] = useState<ActionType>(ActionType.INFO_OR_APOLOGY);
   const [editImage, setEditImage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
@@ -44,9 +45,20 @@ const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBa
 
   const handleAddNote = async () => {
     if (!newNote.trim()) return;
-    await firestoreService.addNote(complaint.id, newNote, user);
+    await firestoreService.addNote(complaint.id, newNote, actionType, user);
     setNewNote('');
+    setActionType(ActionType.INFO_OR_APOLOGY); // Reset to default
     onUpdate();
+  };
+
+  const handleDeleteNote = async (actionId: string) => {
+    if (!confirm('Bu notu silmek istediğinize emin misiniz?')) return;
+    try {
+      await firestoreService.deleteNote(complaint.id, actionId, user);
+      onUpdate();
+    } catch (error: any) {
+      alert(error.message || 'Not silinirken bir hata oluştu.');
+    }
   };
 
   if (isEditing) {
@@ -112,6 +124,13 @@ const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBa
                     ${complaint.status === ComplaintStatus.RESOLVED ? 'bg-green-900/50 text-green-200 border border-green-800' : ''}
                     ${complaint.status === ComplaintStatus.REJECTED ? 'bg-red-900/50 text-red-200 border border-red-800' : ''}
                     ${complaint.status === ComplaintStatus.INVESTIGATING ? 'bg-blue-900/50 text-blue-200 border border-blue-800' : ''}
+                    ${complaint.status === ComplaintStatus.PENDING ? 'bg-purple-900/50 text-purple-200 border border-purple-800' : ''}
+                    ${complaint.status === ComplaintStatus.WAITING_FOR_INFO ? 'bg-orange-900/50 text-orange-200 border border-orange-800' : ''}
+                    ${complaint.status === ComplaintStatus.ESCALATED ? 'bg-indigo-900/50 text-indigo-200 border border-indigo-800' : ''}
+                    ${complaint.status === ComplaintStatus.PARTIALLY_RESOLVED ? 'bg-yellow-800/50 text-yellow-100 border border-yellow-700' : ''}
+                    ${complaint.status === ComplaintStatus.LEGAL_PROCESS ? 'bg-slate-900/50 text-slate-200 border border-slate-800' : ''}
+                    ${complaint.status === ComplaintStatus.REOPENED ? 'bg-red-800/50 text-red-100 border border-red-700' : ''}
+                    ${complaint.status === ComplaintStatus.CANCELLED ? 'bg-gray-900/50 text-gray-200 border border-gray-800' : ''}
                   `}>
                     {complaint.status}
                   </span>
@@ -229,6 +248,17 @@ const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBa
             </div>
 
             <div className="mt-6">
+              <label className="block text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">İşlem Tipi</label>
+              <select
+                value={actionType}
+                onChange={(e) => setActionType(e.target.value as ActionType)}
+                className="w-full bg-white text-black border border-gray-300 rounded-lg p-3 text-sm mb-3 focus:outline-none focus:ring-4 focus:ring-blue-500/30 font-medium"
+              >
+                {Object.values(ActionType).map(type => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+
               <label className="block text-xs text-gray-400 mb-1 font-semibold uppercase tracking-wider">Not / Talimat Ekle</label>
               <textarea
                 value={newNote}
@@ -248,12 +278,55 @@ const ComplaintDetail: React.FC<ComplaintDetailProps> = ({ complaint, user, onBa
           <div className="bg-brand-card p-6 rounded-xl shadow-xl border border-brand-border">
             <h3 className="font-bold mb-4 text-xs text-white uppercase tracking-widest opacity-80">İşlem Geçmişi & Notlar</h3>
             <div className="space-y-3 max-h-80 overflow-y-auto pr-2 custom-scrollbar">
-              {complaint.managerNotes.map((note, i) => (
-                <div key={i} className="text-xs bg-yellow-900/10 p-3 rounded-lg border border-yellow-800/30 text-yellow-100/80 leading-relaxed italic">
-                  {note}
-                </div>
-              ))}
-              {complaint.managerNotes.length === 0 && <p className="text-gray-500 text-sm italic">Henüz bir not eklenmemiş.</p>}
+              {/* Always show managerActions if available, even if empty */}
+              {complaint.managerActions !== undefined ? (
+                complaint.managerActions.length > 0 ? (
+                  complaint.managerActions.map((action) => {
+                    const canDelete = user.role === 'ADMIN' || user.role === 'MANAGER' || action.userId === user.id;
+                    return (
+                      <div key={action.id} className="bg-gradient-to-r from-yellow-900/10 to-orange-900/10 p-4 rounded-lg border border-yellow-800/30 relative group">
+                        <div className="flex items-start justify-between mb-2">
+                          <span className="text-xs font-bold text-yellow-400 bg-yellow-900/30 px-2 py-1 rounded">
+                            {action.actionType}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">
+                              {new Date(action.timestamp).toLocaleString('tr-TR')}
+                            </span>
+                            {canDelete && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteNote(action.id);
+                                }}
+                                className="opacity-0 group-hover:opacity-100 transition-opacity text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded hover:bg-red-900/20"
+                                title="Notu Sil"
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-sm text-yellow-100/90 leading-relaxed mb-1">{action.note}</p>
+                        <p className="text-xs text-gray-500 italic">— {action.userName}</p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-gray-500 text-sm italic">Henüz bir not eklenmemiş.</p>
+                )
+              ) : (
+                /* Fallback to legacy notes for old complaints */
+                complaint.managerNotes && complaint.managerNotes.length > 0 ? (
+                  complaint.managerNotes.map((note, i) => (
+                    <div key={i} className="text-xs bg-yellow-900/10 p-3 rounded-lg border border-yellow-800/30 text-yellow-100/80 leading-relaxed italic">
+                      {note}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-gray-500 text-sm italic">Henüz bir not eklenmemiş.</p>
+                )
+              )}
             </div>
           </div>
 

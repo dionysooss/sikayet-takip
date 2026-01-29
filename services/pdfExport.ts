@@ -357,9 +357,20 @@ export const exportComplaintToPDF = (complaint: Complaint) => {
     <div class="section-header">
       <div class="section-title">📝 Yönetici Notları</div>
     </div>
-    ${complaint.managerNotes.length > 0
-      ? `<ul class="notes-list">${complaint.managerNotes.map(note => `<li>${note}</li>`).join('')}</ul>`
-      : '<p class="no-notes">Henüz bir not eklenmemiş</p>'
+    ${complaint.managerActions && complaint.managerActions.length > 0
+      ? `<ul class="notes-list">${complaint.managerActions.map(action => `
+          <li>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+              <strong style="color: #d97706; font-size: 9pt;">${action.actionType}</strong>
+              <span style="color: #6b7280; font-size: 8pt;">${new Date(action.timestamp).toLocaleString('tr-TR')}</span>
+            </div>
+            <div style="margin-bottom: 4px;">${action.note}</div>
+            <div style="font-size: 8pt; color: #6b7280; font-style: italic;">— ${action.userName}</div>
+          </li>
+        `).join('')}</ul>`
+      : complaint.managerNotes.length > 0
+        ? `<ul class="notes-list">${complaint.managerNotes.map(note => `<li>${note}</li>`).join('')}</ul>`
+        : '<p class="no-notes">Henüz bir not eklenmemiş</p>'
     }
   </div>
 

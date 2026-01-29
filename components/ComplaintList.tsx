@@ -20,6 +20,13 @@ const StatusBadge = ({ status }: { status: ComplaintStatus | string }) => {
     [ComplaintStatus.INVESTIGATING]: "bg-blue-500/20 text-blue-200 border-blue-500/30 ring-blue-500/20",
     [ComplaintStatus.RESOLVED]: "bg-emerald-500/20 text-emerald-200 border-emerald-500/30 ring-emerald-500/20",
     [ComplaintStatus.REJECTED]: "bg-rose-500/20 text-rose-200 border-rose-500/30 ring-rose-500/20",
+    [ComplaintStatus.PENDING]: "bg-purple-500/20 text-purple-200 border-purple-500/30 ring-purple-500/20",
+    [ComplaintStatus.WAITING_FOR_INFO]: "bg-orange-500/20 text-orange-200 border-orange-500/30 ring-orange-500/20",
+    [ComplaintStatus.ESCALATED]: "bg-indigo-500/20 text-indigo-200 border-indigo-500/30 ring-indigo-500/20",
+    [ComplaintStatus.PARTIALLY_RESOLVED]: "bg-yellow-500/20 text-yellow-200 border-yellow-500/30 ring-yellow-500/20",
+    [ComplaintStatus.LEGAL_PROCESS]: "bg-slate-500/20 text-slate-200 border-slate-500/30 ring-slate-500/20",
+    [ComplaintStatus.REOPENED]: "bg-red-500/20 text-red-200 border-red-500/30 ring-red-500/20",
+    [ComplaintStatus.CANCELLED]: "bg-gray-500/20 text-gray-200 border-gray-500/30 ring-gray-500/20",
   };
 
   const icons: Record<string, string> = {
@@ -27,6 +34,13 @@ const StatusBadge = ({ status }: { status: ComplaintStatus | string }) => {
     [ComplaintStatus.INVESTIGATING]: "🔍",
     [ComplaintStatus.RESOLVED]: "✅",
     [ComplaintStatus.REJECTED]: "❌",
+    [ComplaintStatus.PENDING]: "⏸️",
+    [ComplaintStatus.WAITING_FOR_INFO]: "📨",
+    [ComplaintStatus.ESCALATED]: "📤",
+    [ComplaintStatus.PARTIALLY_RESOLVED]: "⚠️",
+    [ComplaintStatus.LEGAL_PROCESS]: "⚖️",
+    [ComplaintStatus.REOPENED]: "🔄",
+    [ComplaintStatus.CANCELLED]: "🚫",
   };
 
   const styleClass = styles[safeStatus] || "bg-gray-800 text-gray-300 border-gray-700";

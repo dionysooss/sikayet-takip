@@ -6,10 +6,17 @@ export enum UserRole {
 }
 
 export enum ComplaintStatus {
-  OPEN = 'Açık',
-  INVESTIGATING = 'İnceleniyor',
-  RESOLVED = 'Çözüldü',
-  REJECTED = 'Reddedildi'
+  OPEN = 'AÇIK',
+  INVESTIGATING = 'İNCELEMEDE',
+  RESOLVED = 'ÇÖZÜLDÜ',
+  REJECTED = 'HAKSIZ VE YERSİZ',
+  PENDING = 'BEKLEMEDE',
+  WAITING_FOR_INFO = 'MÜŞTERIDEN BİLGİ BEKLENİYOR',
+  ESCALATED = 'YÖNETİME İLETİLDİ',
+  PARTIALLY_RESOLVED = 'KISMEN ÇÖZÜLDÜ',
+  LEGAL_PROCESS = 'YASAL SÜREÇTE',
+  REOPENED = 'TEKRAR AÇILDI',
+  CANCELLED = 'İPTAL EDİLDİ'
 }
 
 export enum ComplaintCategory {
@@ -23,6 +30,16 @@ export enum ComplaintCategory {
   PAYMENT_ERROR = 'Hatalı Çekim ve İade',
   PERSONNEL = 'Personel Davranışı',
   OTHER = 'Diğer'
+}
+
+export enum ActionType {
+  STAFF_PHONE_CALL = 'Personel ile Telefon Görüşmesi',
+  STAFF_FACE_TO_FACE = 'Personel ile Yüzyüze Görüşme',
+  PASSENGER_PHONE_CALL = 'Yolcu ile Telefon Görüşmesi',
+  PASSENGER_FACE_TO_FACE = 'Yolcu ile Yüzyüze Görüşme',
+  TICKET_REFUND = 'Bilet İadesi',
+  COMPENSATION = 'Tazminat İşlemi',
+  INFO_OR_APOLOGY = 'Bilgilendirme veya Özür Mesajı'
 }
 
 export interface User {
@@ -52,6 +69,15 @@ export interface Attachment {
   name: string;
   type: string;
   data: string; // Base64
+}
+
+export interface ManagerAction {
+  id: string;
+  note: string;
+  actionType: ActionType;
+  timestamp: string;
+  userId: string;
+  userName: string;
 }
 
 export interface Complaint {
@@ -87,6 +113,7 @@ export interface Complaint {
   updatedAt: string;
   attachments: Attachment[];
   managerNotes: string[];
+  managerActions?: ManagerAction[]; // New: Detailed action history with types
 }
 
 export interface DashboardStats {
